@@ -57,8 +57,8 @@ async function dmKinds(env,chat,id,t,send){
 async function dmSettings(env,chat,id,send){
  const r=await env.DB.prepare("SELECT key,value FROM settings WHERE chat_id=?").bind(id).all();
  const vals=Object.fromEntries(r.results.map(x=>[x.key,x.value]));
- const rows=settings.map(([k,name])=>[b((vals[k]??(k==="self_test"?"on":"on"))==="on"?"✅ "+name:"⏸ "+name,"dm:toggle:"+id+":"+k)]);
- rows.push([b("🧭 Оффтоп: "+(vals.topic_action||"delete"),"dm:toggle:"+id+":topic_action")],[b("🛡 Реакция на спам: "+(vals.spam_action||"warn"),"dm:toggle:"+id+":spam_action")],[b("⬅️ Группа","dm:g:"+id)]);
+ const rows=settings.map(([k,name])=>[b((vals[k]??"on")==="on"?"✅ "+name:"⏸ "+name,"dm:toggle:"+id+":"+k)]);
+ rows.push([b("🧭 Оффтоп: "+((vals.topic_action||"delete")==="delete"?"Удалять":"Предупреждать"),"dm:toggle:"+id+":topic_action")],[b("🛡 Спам: "+((vals.spam_action||"warn")==="delete"?"Удалять":"Предупреждать"),"dm:toggle:"+id+":spam_action")],[b("⬅️ Группа","dm:g:"+id)]);
  await send(env,chat,"⚙️ Настройки · "+label(await groupName(env,id))+"\n\nНажми, чтобы изменить состояние:",{reply_markup:kb(rows)});
 }
 async function dmStats(env,chat,id,send){
@@ -147,7 +147,6 @@ export async function dmCallback(env,q,send,ack){
    if(!Object.hasOwn(LABELS,k)&&k!=="none")throw Error("Неизвестный тип");
    if(k==="none")await env.DB.prepare("DELETE FROM topics WHERE chat_id=? AND thread_id=?").bind(id,t).run();
    else await env.DB.prepare("INSERT INTO topics(chat_id,thread_id,kind) VALUES(?,?,?) ON CONFLICT(chat_id,thread_id) DO UPDATE SET kind=excluded.kind").bind(id,t,k).run();
-   await send(env,q.message.chat.id,"✅ Ветка #"+t+": "+(LABELS[k]||"Без правил"));
    await dmTopics(env,q.message.chat.id,id,send);
   }else if(action==="toggle"){
    if(![...settings.map(x=>x[0]),"topic_action","spam_action"].includes(t))throw Error("Неизвестная настройка");
