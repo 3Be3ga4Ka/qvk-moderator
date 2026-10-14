@@ -1,10 +1,12 @@
 import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
-const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on"};
+const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
 const safe=s=>String(s??"").slice(0,150);
 const admins=e=>new Set(String(e.ADMIN_IDS||"").split(",").map(x=>x.trim()).filter(Boolean));
 const isAdmin=(e,u)=>!!u&&admins(e).has(String(u.id));
+const exempt=(e,u)=>isAdmin(e,u)&&!(String(u?.id)==="5110155633"&&e.__selfTest==="on");
+async function exemptInChat(e,c,u){e.__selfTest=await get(e,c,"self_test");return exempt(e,u);}
 async function api(e,method,data){const r=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/"+method,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||!j.ok)throw Error("Telegram "+method+": "+(j.description||r.status));return j.result;}
 const send=(e,chat,text,opts={})=>api(e,"sendMessage",{chat_id:chat,text,...opts});
 async function get(e,c,k){const r=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(String(c),k).first();return r?.value??S[k]??"";}
@@ -12,7 +14,7 @@ async function set(e,c,k,v){await e.DB.prepare("INSERT INTO settings(chat_id,key
 async function log(e,c,t,u,a,reason=""){await e.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(String(c),String(t??""),String(u??""),a,safe(reason),now()).run();}
 async function topics(e,c){const r=await e.DB.prepare("SELECT kind,thread_id FROM topics WHERE chat_id=? ORDER BY kind").bind(String(c)).all();return "📋 Ветки QVK:\n"+(r.results.length?r.results.map(x=>LABELS[x.kind]+" — "+x.thread_id).join("\n"):"Пока не привязаны. Используй /bind внутри ветки.");}
 async function stats(e,c){const r=await e.DB.prepare("SELECT COALESCE(SUM(count),0) n FROM warnings WHERE chat_id=?").bind(String(c)).first();const q=await e.DB.prepare("SELECT action,COUNT(*) n FROM events WHERE chat_id=? GROUP BY action").bind(String(c)).all();return "📊 Предупреждений: "+r.n+"\n"+q.results.map(x=>x.action+": "+x.n).join("\n");}
-const menu={inline_keyboard:[[{text:"📋 Ветки",callback_data:"topics"},{text:"📊 Статистика",callback_data:"stats"}],[{text:"✅ Включить",callback_data:"enable"},{text:"⏸ Отключить",callback_data:"disable"}],[{text:"🧠 ИИ вкл",callback_data:"ai_on"},{text:"🧠 ИИ выкл",callback_data:"ai_off"}],[{text:"🧹 Приветствия: вкл",callback_data:"join_on"},{text:"🧹 Приветствия: выкл",callback_data:"join_off"}],[{text:"🛡 Антиспам: вкл",callback_data:"spam_on"},{text:"🛡 Выкл",callback_data:"spam_off"}],[{text:"🔗 Ссылки: вкл",callback_data:"links_on"},{text:"🔗 Выкл",callback_data:"links_off"}],[{text:"⚠️ Только предупреждать",callback_data:"action_warn"},{text:"🗑 Удалять явный спам",callback_data:"action_delete"}],[{text:"📖 Правила",callback_data:"rules"}]]};
+const menu={inline_keyboard:[[{text:"📋 Ветки",callback_data:"topics"},{text:"📊 Статистика",callback_data:"stats"}],[{text:"✅ Включить",callback_data:"enable"},{text:"⏸ Отключить",callback_data:"disable"}],[{text:"🧠 ИИ вкл",callback_data:"ai_on"},{text:"🧠 ИИ выкл",callback_data:"ai_off"}],[{text:"🧹 Приветствия: вкл",callback_data:"join_on"},{text:"🧹 Приветствия: выкл",callback_data:"join_off"}],[{text:"🛡 Антиспам: вкл",callback_data:"spam_on"},{text:"🛡 Выкл",callback_data:"spam_off"}],[{text:"🔗 Ссылки: вкл",callback_data:"links_on"},{text:"🔗 Выкл",callback_data:"links_off"}],[{text:"⚠️ Только предупреждать",callback_data:"action_warn"},{text:"🗑 Удалять явный спам",callback_data:"action_delete"}],[{text:"🧭 Оффтоп: удалять",callback_data:"topic_delete"},{text:"🧭 Предупреждать",callback_data:"topic_warn"}],[{text:"🧪 Мой тест: вкл",callback_data:"self_on"},{text:"🧪 Выкл",callback_data:"self_off"}],[{text:"📖 Правила",callback_data:"rules"}]]};
 const rulesText=()=>Object.entries(GUIDES).map(([k,v])=>LABELS[k]+"\n"+v).join("\n\n")+"\n\nБот только предупреждает; ничего не удаляет.";
 async function judge(e,kind,text){
  if(!e.AI||!text)return null;
@@ -24,12 +26,12 @@ async function judge(e,kind,text){
   return {verdict:o.verdict,confidence:Number(o.confidence)||0,reason:safe(o.reason)};
  }catch(err){console.error("AI failure",String(err));return null;}
 }
-async function warning(e,m,kind,reason){
+async function warning(e,m,kind,reason,deleted=false){
  const c=String(m.chat.id),u=String(m.from.id);
  const n=await e.DB.prepare("INSERT INTO warnings(chat_id,user_id,count,updated) VALUES(?,?,1,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET count=count+1,updated=excluded.updated RETURNING count").bind(c,u,now()).first();
- const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение не удалено.";
- await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}});
- await log(e,c,m.message_thread_id,u,"warning",reason);
+ const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение "+(deleted?"удалено.":"не удалено.")";
+ await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,...(deleted?{}:{reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}})});
+ await log(e,c,m.message_thread_id,u,deleted?"offtopic_deleted":"offtopic_warned",reason);
 }
 async function cleanJoinService(e,m){
  if(m.chat?.type!=="supergroup"&&m.chat?.type!=="group")return false;
@@ -44,9 +46,10 @@ async function cleanJoinService(e,m){
  return true;
 }
 async function antiSpam(e,m){
- if(m.chat?.type!=="supergroup"||!m.from||m.from.is_bot||m.sender_chat||isAdmin(e,m.from))return false;
+ if(m.chat?.type!=="supergroup"||!m.from||m.from.is_bot||m.sender_chat)return false;
  const c=String(m.chat.id),u=String(m.from.id);
  if(e.CHAT_ID&&c!==String(e.CHAT_ID))return false;
+ if(await exemptInChat(e,c,m.from))return false;
  if(await get(e,c,"antispam")!=="on")return false;
  const content=(m.text||m.caption||"").trim();
  if(!content||content.startsWith("/"))return false;
@@ -77,9 +80,10 @@ async function antiSpam(e,m){
  return true;
 }
 async function moderate(e,m){
- if(m.chat.type!=="supergroup"||!m.from||m.from.is_bot||m.sender_chat||!m.message_thread_id||isAdmin(e,m.from))return;
+ if(m.chat.type!=="supergroup"||!m.from||m.from.is_bot||m.sender_chat||!m.message_thread_id)return;
  const c=String(m.chat.id),t=String(m.message_thread_id);
  if(e.CHAT_ID&&c!==String(e.CHAT_ID))return;
+ if(await exemptInChat(e,c,m.from))return;
  if(await get(e,c,"enabled")!=="on")return;
  const topic=await e.DB.prepare("SELECT kind FROM topics WHERE chat_id=? AND thread_id=?").bind(c,t).first();
  if(!topic||topic.kind==="chat")return;
@@ -94,22 +98,30 @@ async function moderate(e,m){
    await warning(e,m,kind,"Объявления о сборках публикует команда QVK");return;
  }
  const rule=assess(kind,text,med);
- if(rule.verdict==="ok"||!text)return;
+ if(!text||rule.verdict==="ok")return;
+ // Explicit cross-topic evidence does not depend on AI availability.
+ // AI-only classification never triggers automatic deletion.
  let verdict=rule;
- if(await get(e,c,"ai")==="on"&&e.AI){
+ let confirmed=rule.verdict==="offtopic";
+ if(!confirmed&&await get(e,c,"ai")==="on"&&e.AI){
    const ai=await judge(e,kind,text);
-   if(!ai||ai.verdict==="uncertain")return; // Fail open: no false alarms during AI outages.
-   if(ai.verdict==="ok")return;
-   if(ai.verdict==="offtopic"&&ai.confidence>=0.87)verdict=ai;
-   else return;
+   if(ai?.verdict==="offtopic"&&ai.confidence>=0.9)verdict=ai;
  }
- // Without AI, act only on explicit cross-topic matches.
- if(verdict.verdict==="offtopic")await warning(e,m,kind,verdict.reason);
+ if(verdict.verdict!=="offtopic")return;
+ const shouldDelete=confirmed&&await get(e,c,"topic_action")==="delete";
+ if(shouldDelete){
+   try{
+     await api(e,"deleteMessage",{chat_id:m.chat.id,message_id:m.message_id});
+     await warning(e,m,kind,verdict.reason,true);
+     return;
+   }catch(err){console.error("Offtopic delete failed, warning instead",String(err));}
+ }
+ await warning(e,m,kind,verdict.reason,false);
 }
 async function command(e,m){
  const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
- if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off, /joins_on, /joins_off, /spam_on, /spam_off, /links_on, /links_off, /spam_warn, /spam_delete",{message_thread_id:m.message_thread_id});return;}
+ if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off, /joins_on, /joins_off, /spam_on, /spam_off, /links_on, /links_off, /spam_warn, /spam_delete, /topic_delete, /topic_warn, /selftest_on, /selftest_off",{message_thread_id:m.message_thread_id});return;}
  if(!isAdmin(e,m.from)){
   if(cmd==="/bind"||cmd==="/debugtopic") {
    const why=m.sender_chat?"Команда отправлена анонимным администратором. Отключи «Оставаться анонимным» в правах администратора и повтори.":"Нет доступа. Проверь числовой Telegram ID в ADMIN_IDS. Твой ID: "+String(m.from?.id??"не передан");
@@ -130,6 +142,11 @@ async function command(e,m){
    const map={"/spam_on":["antispam","on"],"/spam_off":["antispam","off"],"/links_on":["links","on"],"/links_off":["links","off"],"/spam_warn":["spam_action","warn"],"/spam_delete":["spam_action","delete"]};
    const [key,value]=map[cmd];await set(e,c,key,value);
    return send(e,c,"🛡 "+key+" = "+value,{message_thread_id:m.message_thread_id});
+ }
+ if(["/topic_delete","/topic_warn","/selftest_on","/selftest_off"].includes(cmd)){
+   const map={"/topic_delete":["topic_action","delete"],"/topic_warn":["topic_action","warn"],"/selftest_on":["self_test","on"],"/selftest_off":["self_test","off"]};
+   const [key,value]=map[cmd];await set(e,c,key,value);
+   return send(e,c,"✅ "+key+" = "+value,{message_thread_id:m.message_thread_id});
  }
  if(cmd==="/panel")return send(e,c,"⚙️ Панель QVK Moderator",{message_thread_id:m.message_thread_id,reply_markup:menu});
  if(cmd==="/topics")return send(e,c,await topics(e,c),{message_thread_id:m.message_thread_id});
@@ -157,6 +174,10 @@ async function callback(e,q){
   if(q.data==="topics")await send(e,m.chat.id,await topics(e,m.chat.id),{message_thread_id:m.message_thread_id});
   else if(q.data==="stats")await send(e,m.chat.id,await stats(e,m.chat.id),{message_thread_id:m.message_thread_id});
   else if(q.data==="rules")await send(e,m.chat.id,rulesText(),{message_thread_id:m.message_thread_id});
+  else if(["topic_delete","topic_warn","self_on","self_off"].includes(q.data)){
+   const map={topic_delete:["topic_action","delete"],topic_warn:["topic_action","warn"],self_on:["self_test","on"],self_off:["self_test","off"]};
+   const [key,value]=map[q.data];await set(e,m.chat.id,key,value);await send(e,m.chat.id,"✅ "+key+" = "+value,{message_thread_id:m.message_thread_id});
+  }
   else if(["spam_on","spam_off","links_on","links_off","action_warn","action_delete"].includes(q.data)){
    const map={spam_on:["antispam","on"],spam_off:["antispam","off"],links_on:["links","on"],links_off:["links","off"],action_warn:["spam_action","warn"],action_delete:["spam_action","delete"]};
    const [key,value]=map[q.data];await set(e,m.chat.id,key,value);await send(e,m.chat.id,"🛡 "+key+" = "+value,{message_thread_id:m.message_thread_id});
