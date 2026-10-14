@@ -90,13 +90,13 @@ async function dmUsers(env,chat,id,send){
  await send(env,chat,"👤 Участники и предупреждения\nВыбери участника. Бот не выдаёт мут автоматически.",{reply_markup:kb(rows)});
 }
 async function dmUser(env,chat,id,user,send){
- if(!/^\\d{1,20}$/.test(String(user)))throw Error("Неверный Telegram ID");
+ if(!/^\d{1,20}$/.test(String(user)))throw Error("Неверный Telegram ID");
  const r=await env.DB.prepare("SELECT count FROM warnings WHERE chat_id=? AND user_id=?").bind(id,user).first();
  const count=r?.count||0;
  await send(env,chat,"👤 Участник "+user+"\n⚠️ Предупреждений: "+count+"\nДействия выполняются вручную администратором.",{reply_markup:kb([[b("➖ Снять 1 предупреждение","dm:clear:"+id+":"+user)],[b("🔇 Мут 1 час","dm:mute60:"+id+":"+user),b("🔇 24 часа","dm:mute1440:"+id+":"+user)],[b("🔊 Снять мут","dm:unmute:"+id+":"+user)],[b("⬅️ Участники","dm:users:"+id)]])});
 }
 async function dmPunish(env,q,action,id,user,send){
- if(!/^[-]\\d+$/.test(id)||!/^\\d{1,20}$/.test(user))throw Error("Неправильный ID");
+ if(!/^[-]\d+$/.test(id)||!/^\d{1,20}$/.test(user))throw Error("Неправильный ID");
  if(action==="clear"){
   await env.DB.prepare("UPDATE warnings SET count=CASE WHEN count>0 THEN count-1 ELSE 0 END,updated=? WHERE chat_id=? AND user_id=?").bind(Math.floor(Date.now()/1000),id,user).run();
   await env.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(id,"",user,"warning_removed","Снято администратором "+q.from.id,Math.floor(Date.now()/1000)).run();
@@ -121,7 +121,7 @@ export async function dmCallback(env,q,send,ack){
  const panelSend=async(e,chat,text,opts={})=>{
   // Navigate by replacing the same message instead of flooding the chat.
   const out={chat_id:chat,message_id:q.message.message_id,text,...opts};
-  try{const x=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/editMessageText",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(out)}).then(r=>r.json());if(!x.ok&&!String(x.description).includes("message is not modified"))throw Error(x.description);return x.result;}catch(err){console.error("panel edit",String(err));return send(e,chat,text,opts);}
+  try{const x=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/editMessageText",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(out)}).then(r=>r.json());if(!x.ok&&!String(x.description).includes("message is not modified"))throw Error(x.description);return x.result;}catch(err){console.error("panel edit",String(err));return originalSend(e,chat,text,opts);}
  };
  try{
   send=panelSend;
@@ -166,7 +166,7 @@ export async function dmText(env,m,send){
  const v=JSON.parse(state.value),text=String(m.text||"").trim();
  if(text.startsWith("/cancel")){await env.DB.prepare("DELETE FROM settings WHERE chat_id=? AND key='dm_pending'").bind(id).run();await send(env,m.chat.id,"Отменено");return true;}
  if(v.action==="find"){
-  if(!/^\\d{1,20}$/.test(text)){await send(env,m.chat.id,"Нужен числовой Telegram ID. /cancel для отмены.");return true;}
+  if(!/^\d{1,20}$/.test(text)){await send(env,m.chat.id,"Нужен числовой Telegram ID. /cancel для отмены.");return true;}
   await env.DB.prepare("DELETE FROM settings WHERE chat_id=? AND key='dm_pending'").bind(id).run();
   await dmUser(env,m.chat.id,v.id,text,send);return true;
  }
