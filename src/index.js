@@ -4,6 +4,7 @@ import {discover,dmHome,dmCallback,dmText} from "./dm.js";
 import {rememberUser} from "./people.js";
 import {raidJoin,observePunishment,analytics,setting,logAction} from "./advanced.js";
 import {page,appApi} from "./miniapp.js";
+import {registerAppeal,requestAppeal} from "./appeals.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
 const safe=s=>String(s??"").slice(0,150);
@@ -35,7 +36,8 @@ async function warning(e,m,kind,reason,deleted=false){
  const n=await e.DB.prepare("INSERT INTO warnings(chat_id,user_id,count,updated) VALUES(?,?,1,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET count=count+1,updated=excluded.updated RETURNING count").bind(c,u,now()).first();
  await observePunishment(e,m,send);
  const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение "+(deleted?"удалено.":"не удалено.");
- await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,...(deleted?{}:{reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}})});
+ const result=await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,...(deleted?{}:{reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}}),reply_markup:{inline_keyboard:[[{text:"⚖️ Не согласен — подать апелляцию",callback_data:"appeal:"+c+":"+m.message_id}]]}});
+ await registerAppeal(e,c,m.message_id,u,m.message_thread_id,reason);
  await log(e,c,m.message_thread_id,u,deleted?"offtopic_deleted":"offtopic_warned",reason);
 }
 async function cleanJoinService(e,m){
@@ -114,7 +116,7 @@ async function moderate(e,m){
  }
  if(verdict.verdict!=="offtopic")return;
  if(!confirmed){await log(e,c,t,m.from.id,"ai_review","ИИ предполагает оффтоп, требуется ручная проверка: "+verdict.reason);return;}
- const shouldDelete=confirmed&&!m.reply_to_message&&await get(e,c,"topic_action")==="delete";
+ const shouldDelete=false; // Friendly routing by default: never delete clear off-topic messages automatically.
  if(shouldDelete){
    try{
      await api(e,"deleteMessage",{chat_id:m.chat.id,message_id:m.message_id});
@@ -122,7 +124,13 @@ async function moderate(e,m){
      return;
    }catch(err){console.error("Offtopic delete failed, warning instead",String(err));}
  }
- await warning(e,m,kind,verdict.reason,false);
+ const hintKey="hint:"+m.from.id+":"+t+":"+Math.floor(now()/86400);
+ const once=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind(c,hintKey,now()).run();
+ if(once.meta?.changes){
+  const target=kind==="bugs"?"💡 Предложения":kind==="ideas"?"🐛 Баги":"💬 Общение";
+  await send(e,c,"💜 "+safe(m.from.first_name||"Привет")+"! Кажется, сообщение лучше подойдёт для ветки «"+target+"». Это только подсказка, без предупреждения и удаления.",{message_thread_id:m.message_thread_id,reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}});
+  await log(e,c,t,m.from.id,"topic_hint",verdict.reason);
+ }
 }
 async function command(e,m){
  const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
@@ -185,6 +193,10 @@ async function command(e,m){
 }
 async function callback(e,q){
  const m=q.message;if(!m)return;
+ if(q.data?.startsWith("appeal:")){
+  const result=await requestAppeal(e,q);
+  return api(e,"answerCallbackQuery",{callback_query_id:q.id,text:result?.ok?"✅ Апелляция отправлена администрации":result?.error||"Не удалось отправить",show_alert:true});
+ }
  if(q.data?.startsWith("dm:")){
   if(!isAdmin(e,q.from))return api(e,"answerCallbackQuery",{callback_query_id:q.id,text:"Недостаточно прав",show_alert:true});
   return dmCallback(e,q,send,(env,id)=>api(env,"answerCallbackQuery",{callback_query_id:id}));
