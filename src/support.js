@@ -60,7 +60,7 @@ export function matchAutomatic(articles,query){
   if(!phrase)return [];
   const keys=phrase.split(" ").filter(w=>w.length>3);
   const coverage=keys.filter(w=>tokens.includes(w)).length;
-  return coverage>=2?[{article:x,score:phrase.length+coverage*5}]:[];
+  return (coverage>=2||(phrase.split(" ").length>=3&&coverage>=1))?[{article:x,score:phrase.length+coverage*5}]:[];
  }).sort((a,b)=>b.score-a.score);
  if(!candidates.length)return null;
  if(candidates.length>1&&candidates[0].score-candidates[1].score<8&&candidates[0].article.id!==candidates[1].article.id)return null;
