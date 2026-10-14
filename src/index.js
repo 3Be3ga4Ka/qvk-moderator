@@ -1,6 +1,7 @@
 import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
 import {discover,dmHome,dmCallback,dmText} from "./dm.js";
+import {rememberUser} from "./people.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
 const safe=s=>String(s??"").slice(0,150);
@@ -209,6 +210,10 @@ async function handle(e,u){
  if(u.my_chat_member?.chat?.type==="supergroup")await discover(e,{chat:u.my_chat_member.chat});
  if(!u.message)return;
  await discover(e,u.message);
+ if(u.message.chat.type==="supergroup"||u.message.chat.type==="group"){
+  await rememberUser(e,u.message.chat.id,u.message.from);
+  for(const member of u.message.new_chat_members||[])await rememberUser(e,u.message.chat.id,member);
+ }
  if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&(!String(u.message.text||"").startsWith("/")||String(u.message.text||"").startsWith("/cancel"))&&await dmText(e,u.message,send))return;
  if(await cleanJoinService(e,u.message))return;
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
