@@ -64,16 +64,31 @@ async function command(e,m){
  const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
  if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off",{message_thread_id:m.message_thread_id});return;}
- if(!isAdmin(e,m.from))return;
+ if(!isAdmin(e,m.from)){
+  if(cmd==="/bind"||cmd==="/debugtopic") {
+   const why=m.sender_chat?"Команда отправлена анонимным администратором. Отключи «Оставаться анонимным» в правах администратора и повтори.":"Нет доступа. Проверь числовой Telegram ID в ADMIN_IDS. Твой ID: "+String(m.from?.id??"не передан");
+   return send(e,c,"⚠️ "+why,{message_thread_id:m.message_thread_id});
+  }
+  return;
+ }
+ if(cmd==="/debugtopic"){
+  const msg="🔎 Диагностика ветки\\nchat_id: "+c+"\\nthread_id: "+String(m.message_thread_id??"отсутствует")+"\\nis_topic_message: "+String(m.is_topic_message??false)+"\\nsender_chat: "+String(m.sender_chat?.id??"нет")+"\\nfrom_id: "+String(m.from?.id??"нет")+"\\n\\nЕсли thread_id отсутствует, проверь, что команда отправлена именно в форуме.";
+  return send(e,c,msg.replaceAll("\\n","\n"),{message_thread_id:m.message_thread_id});
+ }
  if(cmd==="/panel")return send(e,c,"⚙️ Панель QVK Moderator",{message_thread_id:m.message_thread_id,reply_markup:menu});
  if(cmd==="/topics")return send(e,c,await topics(e,c),{message_thread_id:m.message_thread_id});
  if(cmd==="/stats")return send(e,c,await stats(e,c),{message_thread_id:m.message_thread_id});
  if(cmd==="/rules")return send(e,c,rulesText(),{message_thread_id:m.message_thread_id});
  if(cmd==="/bind"){
   const kind=String(m.text||"").split(/\s+/)[1];
-  if(!m.message_thread_id||m.chat.type!=="supergroup"||!LABELS[kind])return send(e,c,"Отправь /bind bugs|ideas|badges|chat|releases внутри нужной ветки.");
-  await e.DB.prepare("INSERT INTO topics(chat_id,thread_id,kind) VALUES(?,?,?) ON CONFLICT(chat_id,thread_id) DO UPDATE SET kind=excluded.kind").bind(c,String(m.message_thread_id),kind).run();
-  return send(e,c,"✅ Привязана ветка "+LABELS[kind],{message_thread_id:m.message_thread_id});
+  if(m.chat.type!=="supergroup")return send(e,c,"⚠️ Команда /bind работает внутри группы-форума QVK, не в личке.");
+  if(!LABELS[kind])return send(e,c,"⚠️ Укажи тип: /bind bugs, /bind ideas, /bind badges, /bind chat или /bind releases",{message_thread_id:m.message_thread_id});
+  const thread=m.message_thread_id??(m.is_topic_message===false?1:null);
+  if(thread===null)return send(e,c,"⚠️ Telegram не передал message_thread_id. Выполни /debugtopic здесь и проверь настройки тем.",{message_thread_id:m.message_thread_id});
+  try{
+   await e.DB.prepare("INSERT INTO topics(chat_id,thread_id,kind) VALUES(?,?,?) ON CONFLICT(chat_id,thread_id) DO UPDATE SET kind=excluded.kind").bind(c,String(thread),kind).run();
+   return send(e,c,"✅ Привязана ветка "+LABELS[kind]+" (ID "+thread+")",{message_thread_id:m.message_thread_id});
+  }catch(err){console.error("Bind failed",String(err));return send(e,c,"❌ Не удалось сохранить ветку в D1. Проверь таблицу topics и привязку DB.",{message_thread_id:m.message_thread_id});}
  }
  const changes={"/enable":["enabled","on"],"/disable":["enabled","off"],"/ai_on":["ai","on"],"/ai_off":["ai","off"]};
  if(changes[cmd]){const [key,val]=changes[cmd];await set(e,c,key,val);await send(e,c,"✅ "+key+": "+val,{message_thread_id:m.message_thread_id});}
