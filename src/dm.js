@@ -117,6 +117,7 @@ async function dmPunish(env,q,action,id,user,send){
 export async function dmCallback(env,q,send,ack){
  if(q.message?.chat?.type!=="private"||!q.data?.startsWith("dm:"))return false;
  const [_,action,id,t,k]=q.data.split(":");
+ const originalSend=send;
  const panelSend=async(e,chat,text,opts={})=>{
   // Navigate by replacing the same message instead of flooding the chat.
   const out={chat_id:chat,message_id:q.message.message_id,text,...opts};
