@@ -28,9 +28,10 @@ async function topics(env,id){
 }
 const b=(text,data)=>({text,callback_data:data});
 const kb=rows=>({inline_keyboard:rows});
+const webApp=(env)=>({text:"📱 Открыть Mini App",web_app:{url:String(env.MINI_APP_URL||"https://qvk-moderator.qmurzik7.workers.dev/app")}});
 async function groupName(e,id){const x=await e.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+id).first();try{return JSON.parse(x?.value||"{}").title||"Группа QVK";}catch{return "Группа QVK";}}
 async function topicName(e,id,thread){if(!thread)return "Общая";const x=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(id,"topic:"+thread).first();return x?.value||"Ветка #"+thread;}
-const settings=[["enabled","Модерация"],["ai","ИИ"],["antispam","Антиспам"],["links","Проверка ссылок"],["join_cleanup","Очистка вступлений"],["self_test","Самопроверка"]];
+const settings=[["enabled","Модерация"],["ai","ИИ"],["antispam","Антиспам"],["links","Проверка ссылок"],["join_cleanup","Очистка вступлений"],["raid_watch","Антирейд"],["auto_punish","Контроль предупреждений"],["self_test","Самопроверка"]];
 export async function dmHome(env,chat,send){
  const g=await groups(env);
  const rows=g.map(x=>[b("👥 "+label(x.title||x.id,45),"dm:g:"+x.id)]);
@@ -41,7 +42,7 @@ async function dmGroup(env,chat,id,send){
  const r=await env.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+id).first();
  if(!r)return send(env,chat,"Группа не зарегистрирована. Отправь /panel внутри группы.");
  const name=JSON.parse(r.value).title;
- await send(env,chat,"💜 QVK Moderator\n\n👥 "+label(name)+"\n\nВыбери раздел управления:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[b("👤 Участники и наказания","dm:users:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
+ await send(env,chat,"💜 QVK Moderator\n\n👥 "+label(name)+"\n\nВыбери раздел управления:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[webApp(env)],[b("👤 Участники и наказания","dm:users:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
 }
 async function dmTopics(env,chat,id,send){
  const arr=await topics(env,id);
@@ -57,7 +58,7 @@ async function dmKinds(env,chat,id,t,send){
 async function dmSettings(env,chat,id,send){
  const r=await env.DB.prepare("SELECT key,value FROM settings WHERE chat_id=?").bind(id).all();
  const vals=Object.fromEntries(r.results.map(x=>[x.key,x.value]));
- const rows=settings.map(([k,name])=>[b((vals[k]??"on")==="on"?"✅ "+name:"⏸ "+name,"dm:toggle:"+id+":"+k)]);
+ const rows=settings.map(([k,name])=>[b((vals[k]??(k==="auto_punish"?"off":"on"))==="on"?"✅ "+name:"⏸ "+name,"dm:toggle:"+id+":"+k)]);
  rows.push([b("🧭 Оффтоп: "+((vals.topic_action||"delete")==="delete"?"Удалять":"Предупреждать"),"dm:toggle:"+id+":topic_action")],[b("🛡 Спам: "+((vals.spam_action||"warn")==="delete"?"Удалять":"Предупреждать"),"dm:toggle:"+id+":spam_action")],[b("⬅️ Группа","dm:g:"+id)]);
  await send(env,chat,"⚙️ Настройки · "+label(await groupName(env,id))+"\n\nНажми, чтобы изменить состояние:",{reply_markup:kb(rows)});
 }
@@ -151,7 +152,7 @@ export async function dmCallback(env,q,send,ack){
   }else if(action==="toggle"){
    if(![...settings.map(x=>x[0]),"topic_action","spam_action"].includes(t))throw Error("Неизвестная настройка");
    const previous=await env.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(id,t).first();
-   const old=previous?.value??(t==="spam_action"?"warn":t==="topic_action"?"delete":"on");
+   const old=previous?.value??(t==="spam_action"?"warn":t==="topic_action"?"delete":t==="auto_punish"?"off":"on");
    const next=t==="spam_action"?(old==="warn"?"delete":"warn"):t==="topic_action"?(old==="delete"?"warn":"delete"):(old==="on"?"off":"on");
    await env.DB.prepare("INSERT INTO settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value").bind(id,t,next).run();
    await dmSettings(env,q.message.chat.id,id,send);
