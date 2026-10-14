@@ -4,6 +4,7 @@ import {discover,dmHome,dmCallback,dmText} from "./dm.js";
 import {rememberUser} from "./people.js";
 import {raidJoin,observePunishment,analytics,setting,logAction} from "./advanced.js";
 import {page,appApi} from "./miniapp.js";
+import {supportMessage} from "./support.js";
 import {registerAppeal,requestAppeal} from "./appeals.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
@@ -138,6 +139,7 @@ async function command(e,m){
  const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
  if(m.chat.type==="private"&&isAdmin(e,m.from)&&(cmd==="/panel"||cmd==="/groups"||cmd==="/start"))return dmHome(e,c,send);
+ if(cmd==="/qvk"||cmd==="/faq"){const question=String(m.text||"").replace(/^\/\w+(?:@\w+)?\s*/,"").trim();return supportMessage(e,m,question,isAdmin(e,m.from),send);}
  if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off, /joins_on, /joins_off, /spam_on, /spam_off, /links_on, /links_off, /spam_warn, /spam_delete, /topic_delete, /topic_warn, /selftest_on, /selftest_off",{message_thread_id:m.message_thread_id});return;}
  if(!isAdmin(e,m.from)){
   if(cmd==="/bind"||cmd==="/debugtopic") {
