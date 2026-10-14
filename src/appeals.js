@@ -3,7 +3,7 @@ export async function registerAppeal(e,chat,messageId,user,thread,reason,counted
  await e.DB.prepare("INSERT OR IGNORE INTO settings(chat_id,key,value) VALUES(?,?,?)").bind(String(chat),"appeal:"+messageId,value).run();
 }
 export async function requestAppeal(e,q){
- const match=/^appeal:([-]\\d+):(\\d+)$/.exec(q.data||"");
+ const match=/^appeal:([-]\d+):(\d+)$/.exec(q.data||"");
  if(!match)return false;
  const [,chat,msg]=match;
  if(String(q.message?.chat?.id)!==chat)return {error:"Неизвестный чат"};
@@ -25,7 +25,7 @@ export async function appeals(e,chat){
  return r.results.flatMap(x=>{try{const o=JSON.parse(x.value);return o.status==="pending"?[{id:x.key.slice(7),...o}]:[]}catch{return []}});
 }
 export async function decide(e,chat,id,decision,admin){
- if(!/^\\d{1,12}$/.test(String(id))||!["approve","reject"].includes(decision))throw Error("Некорректное решение");
+ if(!/^\d{1,12}$/.test(String(id))||!["approve","reject"].includes(decision))throw Error("Некорректное решение");
  const key="appeal:"+id;
  const old=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(String(chat),key).first();
  if(!old)throw Error("Апелляция не найдена");
