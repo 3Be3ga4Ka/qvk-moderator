@@ -38,7 +38,7 @@ async function dmGroup(env,chat,id,send){
  const r=await env.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+id).first();
  if(!r)return send(env,chat,"Группа не зарегистрирована. Отправь /panel внутри группы.");
  const name=JSON.parse(r.value).title;
- await send(env,chat,"⚙️ "+label(name)+"\nГруппа: "+id+"\nВыбирай раздел:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
+ await send(env,chat,"⚙️ "+label(name)+"\nГруппа: "+id+"\nВыбирай раздел:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[b("👤 Участники и наказания","dm:users:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
 }
 async function dmTopics(env,chat,id,send){
  const arr=await topics(env,id);
@@ -83,10 +83,47 @@ async function dmRights(env,chat,id,send){
   await send(env,chat,["🩺 Права бота", "Статус: "+p.status, "Удалять сообщения: "+(p.can_delete_messages?"✅":"❌"),"Ограничивать участников: "+(p.can_restrict_members?"✅":"❌"),"Управлять темами: "+(p.can_manage_topics?"✅":"❌"),"Чтобы бот удалял оффтоп, ему нужно право удалять сообщения."].join("\n"),{reply_markup:kb([[b("🔄 Проверить снова","dm:rights:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
  }catch(err){await send(env,chat,"Не удалось проверить права: "+label(err.message));}
 }
+async function dmUsers(env,chat,id,send){
+ const r=await env.DB.prepare("SELECT w.user_id,w.count FROM warnings w WHERE w.chat_id=? AND w.count>0 ORDER BY w.updated DESC LIMIT 20").bind(id).all();
+ const rows=r.results.map(x=>[b("👤 "+x.user_id+" · ⚠️ "+x.count,"dm:user:"+id+":"+x.user_id)]);
+ rows.push([b("🔎 Ввести ID участника","dm:find:"+id)],[b("⬅️ Группа","dm:g:"+id)]);
+ await send(env,chat,"👤 Участники и предупреждения\nВыбери участника. Бот не выдаёт мут автоматически.",{reply_markup:kb(rows)});
+}
+async function dmUser(env,chat,id,user,send){
+ if(!/^\\d{1,20}$/.test(String(user)))throw Error("Неверный Telegram ID");
+ const r=await env.DB.prepare("SELECT count FROM warnings WHERE chat_id=? AND user_id=?").bind(id,user).first();
+ const count=r?.count||0;
+ await send(env,chat,"👤 Участник "+user+"\n⚠️ Предупреждений: "+count+"\nДействия выполняются вручную администратором.",{reply_markup:kb([[b("➖ Снять 1 предупреждение","dm:clear:"+id+":"+user)],[b("🔇 Мут 1 час","dm:mute60:"+id+":"+user),b("🔇 24 часа","dm:mute1440:"+id+":"+user)],[b("🔊 Снять мут","dm:unmute:"+id+":"+user)],[b("⬅️ Участники","dm:users:"+id)]])});
+}
+async function dmPunish(env,q,action,id,user,send){
+ if(!/^[-]\\d+$/.test(id)||!/^\\d{1,20}$/.test(user))throw Error("Неправильный ID");
+ if(action==="clear"){
+  await env.DB.prepare("UPDATE warnings SET count=CASE WHEN count>0 THEN count-1 ELSE 0 END,updated=? WHERE chat_id=? AND user_id=?").bind(Math.floor(Date.now()/1000),id,user).run();
+  await env.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(id,"",user,"warning_removed","Снято администратором "+q.from.id,Math.floor(Date.now()/1000)).run();
+ }else{
+  // Telegram requires can_restrict_members on the bot. Do not mute administrators.
+  const check=await fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getChatMember",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:id,user_id:user})}).then(r=>r.json());
+  if(!check.ok)throw Error(check.description||"Пользователь не найден");
+  if(["administrator","creator"].includes(check.result.status))throw Error("Нельзя ограничивать администратора");
+  const duration=action==="mute60"?3600:action==="mute1440"?86400:0;
+  const data={chat_id:id,user_id:user,permissions:{can_send_messages:duration===0,can_send_audios:duration===0,can_send_documents:duration===0,can_send_photos:duration===0,can_send_videos:duration===0,can_send_video_notes:duration===0,can_send_voice_notes:duration===0,can_send_polls:duration===0,can_send_other_messages:duration===0,can_add_web_page_previews:duration===0,can_invite_users:duration===0},use_independent_chat_permissions:true};
+  if(duration)data.until_date=Math.floor(Date.now()/1000)+duration;
+  const res=await fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/restrictChatMember",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(data)}).then(r=>r.json());
+  if(!res.ok)throw Error(res.description||"Не удалось изменить ограничение");
+  await env.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(id,"",user,action,"Администратор "+q.from.id,Math.floor(Date.now()/1000)).run();
+ }
+ await dmUser(env,q.message.chat.id,id,user,send);
+}
 export async function dmCallback(env,q,send,ack){
  if(q.message?.chat?.type!=="private"||!q.data?.startsWith("dm:"))return false;
  const [_,action,id,t,k]=q.data.split(":");
+ const panelSend=async(e,chat,text,opts={})=>{
+  // Navigate by replacing the same message instead of flooding the chat.
+  const out={chat_id:chat,message_id:q.message.message_id,text,...opts};
+  try{const x=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/editMessageText",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(out)}).then(r=>r.json());if(!x.ok&&!String(x.description).includes("message is not modified"))throw Error(x.description);return x.result;}catch(err){console.error("panel edit",String(err));return send(e,chat,text,opts);}
+ };
  try{
+  send=panelSend;
   if(action==="home")await dmHome(env,q.message.chat.id,send);
   else if(action==="g")await dmGroup(env,q.message.chat.id,id,send);
   else if(action==="t")await dmTopics(env,q.message.chat.id,id,send);
@@ -95,6 +132,10 @@ export async function dmCallback(env,q,send,ack){
   else if(action==="stats")await dmStats(env,q.message.chat.id,id,send);
   else if(action==="logs")await dmLogs(env,q.message.chat.id,id,send);
   else if(action==="rights")await dmRights(env,q.message.chat.id,id,send);
+  else if(action==="users")await dmUsers(env,q.message.chat.id,id,send);
+  else if(action==="user")await dmUser(env,q.message.chat.id,id,t,send);
+  else if(action==="find"){await env.DB.prepare("INSERT INTO settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value").bind(String(q.from.id),"dm_pending",JSON.stringify({action:"find",id})).run();await send(env,q.message.chat.id,"Отправь Telegram ID участника (только цифры). Для отмены /cancel");}
+  else if(["clear","mute60","mute1440","unmute"].includes(action))await dmPunish(env,q,action,id,t,send);
   else if(action==="a"){
    if(!Object.hasOwn(LABELS,k)&&k!=="none")throw Error("Неизвестный тип");
    if(k==="none")await env.DB.prepare("DELETE FROM topics WHERE chat_id=? AND thread_id=?").bind(id,t).run();
@@ -123,6 +164,11 @@ export async function dmText(env,m,send){
  if(!state)return false;
  const v=JSON.parse(state.value),text=String(m.text||"").trim();
  if(text.startsWith("/cancel")){await env.DB.prepare("DELETE FROM settings WHERE chat_id=? AND key='dm_pending'").bind(id).run();await send(env,m.chat.id,"Отменено");return true;}
+ if(v.action==="find"){
+  if(!/^\\d{1,20}$/.test(text)){await send(env,m.chat.id,"Нужен числовой Telegram ID. /cancel для отмены.");return true;}
+  await env.DB.prepare("DELETE FROM settings WHERE chat_id=? AND key='dm_pending'").bind(id).run();
+  await dmUser(env,m.chat.id,v.id,text,send);return true;
+ }
  let thread=v.thread, title=text;
  if(v.action==="new"){
   const match=text.match(/^(\d+)\s+(.{1,90})$/s);
