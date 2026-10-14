@@ -78,11 +78,13 @@ async function antiSpam(e,m){
   try{
    await api(e,"deleteMessage",{chat_id:m.chat.id,message_id:m.message_id});
    await log(e,c,m.message_thread_id,u,"spam_deleted",reason);
-   await send(e,c,"🛡 Сообщение удалено: "+reason,{message_thread_id:m.message_thread_id});
+   const notice=await send(e,c,"🛡 Сообщение удалено: "+reason+"\nЕсли считаешь решение ошибочным, можно подать апелляцию.",{message_thread_id:m.message_thread_id,reply_markup:{inline_keyboard:[[{text:"⚖️ Обжаловать удаление",callback_data:"appeal:"+c+":"+m.message_id}]]}});
+   await registerAppeal(e,c,m.message_id,u,m.message_thread_id,reason,false);
    return true;
   }catch(err){console.error("Spam delete failed; falling back to warning",String(err));}
  }
- await send(e,c,"⚠️ "+String(m.from.first_name||"Участник").slice(0,50)+", антиспам QVK: "+reason+"\nСообщение не удалено.",{message_thread_id:m.message_thread_id,reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}});
+ await send(e,c,"⚠️ "+String(m.from.first_name||"Участник").slice(0,50)+", антиспам QVK: "+reason+"\nСообщение не удалено.",{message_thread_id:m.message_thread_id,reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true},reply_markup:{inline_keyboard:[[{text:"⚖️ Не согласен",callback_data:"appeal:"+c+":"+m.message_id}]]}});
+ await registerAppeal(e,c,m.message_id,u,m.message_thread_id,reason,false);
  await log(e,c,m.message_thread_id,u,"spam_warning",reason);
  return true;
 }
