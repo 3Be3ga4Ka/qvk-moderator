@@ -11,4 +11,4 @@ binding = "AI"
 [[d1_databases]]
 binding = "DB"
 database_name = "qvk-moderator-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "bbebd392-3ea6-43e7-8012-33c923be4700"
