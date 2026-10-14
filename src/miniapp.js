@@ -5,7 +5,7 @@ export async function authorized(e,init){
  if(typeof init!=="string"||init.length>8192||!e.BOT_TOKEN)return null;
  const p=new URLSearchParams(init),signature=p.get("hash");if(!signature||!(/^[a-f0-9]{64}$/i.test(signature)))return null;
  const auth=Number(p.get("auth_date"));if(!auth||Math.abs(Date.now()/1000-auth)>3600)return null;
- const lines=[...p.entries()].filter(([k])=>k!=="hash"&&k!=="signature").sort((a,b)=>a[0].localeCompare(b[0])).map(([k,v])=>k+"="+v).join("\n");
+ const lines=[...p.entries()].filter(([k])=>k!=="hash").sort((a,b)=>a[0].localeCompare(b[0])).map(([k,v])=>k+"="+v).join("\n");
  const secret=await hmac(encoder.encode("WebAppData"),e.BOT_TOKEN);
  const actual=hex(await hmac(secret,lines));
  if(actual!==signature.toLowerCase())return null;
@@ -26,7 +26,7 @@ export function page(){return new Response(html,{headers:{"Content-Type":"text/h
 export async function appApi(req,e,analytics){
  if(req.method!=="POST")return new Response("Method Not Allowed",{status:405});
  let b;try{b=await req.json();}catch{return Response.json({error:"Неверный JSON"},{status:400})}
- const user=await authorized(e,b.init);if(!user)return Response.json({error:"Авторизация Telegram не пройдена"},{status:401});
+ const user=await authorized(e,b.init);if(!user)return Response.json({error:"Проверка данных Telegram не пройдена. Обнови Mini App через меню бота; если ошибка осталась, проверь ADMIN_IDS и BOT_TOKEN в Cloudflare.",code:"INVALID_TELEGRAM_INIT_DATA"},{status:401});
  const groups=await e.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key LIKE 'chat:%' ORDER BY key").all();
  const list=groups.results.map(r=>{try{return JSON.parse(r.value)}catch{return null}}).filter(Boolean);
  if(b.op==="groups")return Response.json({groups:list});
