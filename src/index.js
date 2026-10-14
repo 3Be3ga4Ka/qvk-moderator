@@ -5,6 +5,7 @@ import {rememberUser} from "./people.js";
 import {raidJoin,observePunishment,analytics,setting,logAction} from "./advanced.js";
 import {page,appApi} from "./miniapp.js";
 import {supportMessage,autoSupport} from "./support.js";
+import {createRecord} from "./workflows.js";
 import {registerAppeal,requestAppeal} from "./appeals.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
@@ -136,9 +137,18 @@ async function moderate(e,m){
  }
 }
 async function command(e,m){
- const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq)(?:@|\s|$)/i.test(String(m.text||"")))return;
+ const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq|ticket|bug)(?:@|\s|$)/i.test(String(m.text||"")))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
  if(m.chat.type==="private"&&isAdmin(e,m.from)&&(cmd==="/panel"||cmd==="/groups"||cmd==="/start"))return dmHome(e,c,send);
+ if(cmd==="/ticket"||cmd==="/bug"){
+  if(!["group","supergroup"].includes(m.chat.type)||!m.from||m.from.is_bot)return;
+  const description=String(m.text||"").replace(/^\/\w+(?:@\w+)?\s*/,"").trim();
+  if(description.length<12)return send(e,c,"Опиши проблему после команды, минимум 12 символов. Например: /bug test38 Android 15 — не открывается плеер.",{message_thread_id:m.message_thread_id});
+  try{const entry=await createRecord(e,m,cmd==="/bug"?"bug":"ticket",description);
+   if(entry.createdNew)await log(e,c,m.message_thread_id,m.from.id,entry.type==="bug"?"bug_recorded":"ticket_created",entry.description.slice(0,120));
+   return send(e,c,(entry.createdNew?"✅ Черновик зарегистрирован: ":"ℹ️ Уже зарегистрирован: ")+(entry.type==="bug"?"баг #":"обращение #")+entry.id+". Просмотр — в Mini App администратора, внешняя отправка отключена.",{message_thread_id:m.message_thread_id});
+  }catch(err){return send(e,c,"⚠️ "+safe(err.message),{message_thread_id:m.message_thread_id});}
+ }
  if(cmd==="/qvk"||cmd==="/faq"){const question=String(m.text||"").replace(/^\/\w+(?:@\w+)?\s*/,"").trim();return supportMessage(e,m,question,isAdmin(e,m.from),send);}
  if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off, /joins_on, /joins_off, /spam_on, /spam_off, /links_on, /links_off, /spam_warn, /spam_delete, /topic_delete, /topic_warn, /selftest_on, /selftest_off",{message_thread_id:m.message_thread_id});return;}
  if(!isAdmin(e,m.from)){
