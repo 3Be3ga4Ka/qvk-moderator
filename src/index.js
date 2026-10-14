@@ -1,5 +1,5 @@
 import {assess,LABELS,GUIDES} from "./rules.js";
-const S={enabled:"on",ai:"on"};
+const S={enabled:"on",ai:"on",join_cleanup:"on"};
 const now=()=>Math.floor(Date.now()/1000);
 const safe=s=>String(s??"").slice(0,150);
 const admins=e=>new Set(String(e.ADMIN_IDS||"").split(",").map(x=>x.trim()).filter(Boolean));
@@ -11,7 +11,7 @@ async function set(e,c,k,v){await e.DB.prepare("INSERT INTO settings(chat_id,key
 async function log(e,c,t,u,a,reason=""){await e.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(String(c),String(t??""),String(u??""),a,safe(reason),now()).run();}
 async function topics(e,c){const r=await e.DB.prepare("SELECT kind,thread_id FROM topics WHERE chat_id=? ORDER BY kind").bind(String(c)).all();return "📋 Ветки QVK:\n"+(r.results.length?r.results.map(x=>LABELS[x.kind]+" — "+x.thread_id).join("\n"):"Пока не привязаны. Используй /bind внутри ветки.");}
 async function stats(e,c){const r=await e.DB.prepare("SELECT COALESCE(SUM(count),0) n FROM warnings WHERE chat_id=?").bind(String(c)).first();const q=await e.DB.prepare("SELECT action,COUNT(*) n FROM events WHERE chat_id=? GROUP BY action").bind(String(c)).all();return "📊 Предупреждений: "+r.n+"\n"+q.results.map(x=>x.action+": "+x.n).join("\n");}
-const menu={inline_keyboard:[[{text:"📋 Ветки",callback_data:"topics"},{text:"📊 Статистика",callback_data:"stats"}],[{text:"✅ Включить",callback_data:"enable"},{text:"⏸ Отключить",callback_data:"disable"}],[{text:"🧠 ИИ вкл",callback_data:"ai_on"},{text:"🧠 ИИ выкл",callback_data:"ai_off"}],[{text:"📖 Правила",callback_data:"rules"}]]};
+const menu={inline_keyboard:[[{text:"📋 Ветки",callback_data:"topics"},{text:"📊 Статистика",callback_data:"stats"}],[{text:"✅ Включить",callback_data:"enable"},{text:"⏸ Отключить",callback_data:"disable"}],[{text:"🧠 ИИ вкл",callback_data:"ai_on"},{text:"🧠 ИИ выкл",callback_data:"ai_off"}],[{text:"🧹 Приветствия: вкл",callback_data:"join_on"},{text:"🧹 Приветствия: выкл",callback_data:"join_off"}],[{text:"📖 Правила",callback_data:"rules"}]]};
 const rulesText=()=>Object.entries(GUIDES).map(([k,v])=>LABELS[k]+"\n"+v).join("\n\n")+"\n\nБот только предупреждает; ничего не удаляет.";
 async function judge(e,kind,text){
  if(!e.AI||!text)return null;
@@ -29,6 +29,18 @@ async function warning(e,m,kind,reason){
  const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение не удалено.";
  await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}});
  await log(e,c,m.message_thread_id,u,"warning",reason);
+}
+async function cleanJoinService(e,m){
+ if(m.chat?.type!=="supergroup"&&m.chat?.type!=="group")return false;
+ if(!m.new_chat_members&&!m.left_chat_member)return false;
+ const c=String(m.chat.id);
+ if(e.CHAT_ID&&c!==String(e.CHAT_ID))return true;
+ if(await get(e,c,"join_cleanup")!=="on")return true;
+ try {
+  await api(e,"deleteMessage",{chat_id:m.chat.id,message_id:m.message_id});
+  await log(e,c,m.message_thread_id,null,"join_service_deleted",m.new_chat_members?"join":"leave");
+ } catch(err) {console.error("Cannot delete join/leave service message (check can_delete_messages)",String(err));}
+ return true;
 }
 async function moderate(e,m){
  if(m.chat.type!=="supergroup"||!m.from||m.from.is_bot||m.sender_chat||!m.message_thread_id||isAdmin(e,m.from))return;
@@ -63,7 +75,7 @@ async function moderate(e,m){
 async function command(e,m){
  const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
- if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off",{message_thread_id:m.message_thread_id});return;}
+ if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off, /joins_on, /joins_off",{message_thread_id:m.message_thread_id});return;}
  if(!isAdmin(e,m.from)){
   if(cmd==="/bind"||cmd==="/debugtopic") {
    const why=m.sender_chat?"Команда отправлена анонимным администратором. Отключи «Оставаться анонимным» в правах администратора и повтори.":"Нет доступа. Проверь числовой Telegram ID в ADMIN_IDS. Твой ID: "+String(m.from?.id??"не передан");
@@ -74,6 +86,11 @@ async function command(e,m){
  if(cmd==="/debugtopic"){
   const msg="🔎 Диагностика ветки\\nchat_id: "+c+"\\nthread_id: "+String(m.message_thread_id??"отсутствует")+"\\nis_topic_message: "+String(m.is_topic_message??false)+"\\nsender_chat: "+String(m.sender_chat?.id??"нет")+"\\nfrom_id: "+String(m.from?.id??"нет")+"\\n\\nЕсли thread_id отсутствует, проверь, что команда отправлена именно в форуме.";
   return send(e,c,msg.replaceAll("\\n","\n"),{message_thread_id:m.message_thread_id});
+ }
+ if(cmd==="/joins_on"||cmd==="/joins_off"){
+   const value=cmd==="/joins_on"?"on":"off";
+   await set(e,c,"join_cleanup",value);
+   return send(e,c,"🧹 Удаление уведомлений о входе/выходе: "+(value==="on"?"включено":"отключено"),{message_thread_id:m.message_thread_id});
  }
  if(cmd==="/panel")return send(e,c,"⚙️ Панель QVK Moderator",{message_thread_id:m.message_thread_id,reply_markup:menu});
  if(cmd==="/topics")return send(e,c,await topics(e,c),{message_thread_id:m.message_thread_id});
@@ -101,6 +118,7 @@ async function callback(e,q){
   if(q.data==="topics")await send(e,m.chat.id,await topics(e,m.chat.id),{message_thread_id:m.message_thread_id});
   else if(q.data==="stats")await send(e,m.chat.id,await stats(e,m.chat.id),{message_thread_id:m.message_thread_id});
   else if(q.data==="rules")await send(e,m.chat.id,rulesText(),{message_thread_id:m.message_thread_id});
+  else if(["join_on","join_off"].includes(q.data)){await set(e,m.chat.id,"join_cleanup",q.data==="join_on"?"on":"off");await send(e,m.chat.id,"🧹 Удаление уведомлений о входе/выходе "+(q.data==="join_on"?"включено":"отключено"),{message_thread_id:m.message_thread_id});}
   else if(["enable","disable","ai_on","ai_off"].includes(q.data)){const key=q.data.startsWith("ai_")?"ai":"enabled";await set(e,m.chat.id,key,q.data==="enable"||q.data==="ai_on"?"on":"off");await send(e,m.chat.id,"✅ Настройка сохранена",{message_thread_id:m.message_thread_id});}
  }finally{await api(e,"answerCallbackQuery",{callback_query_id:q.id});}
 }
@@ -109,6 +127,7 @@ async function handle(e,u){
  if(k){const r=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind("_updates",k,now()).run();if(!r.meta?.changes)return;}
  if(u.callback_query)return callback(e,u.callback_query);
  if(!u.message)return;
+ if(await cleanJoinService(e,u.message))return;
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
  return moderate(e,u.message);
 }
