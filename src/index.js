@@ -2,6 +2,8 @@ import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
 import {discover,dmHome,dmCallback,dmText} from "./dm.js";
 import {rememberUser} from "./people.js";
+import {raidJoin,observePunishment,analytics,setting,logAction} from "./advanced.js";
+import {page,appApi} from "./miniapp.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
 const safe=s=>String(s??"").slice(0,150);
@@ -31,6 +33,7 @@ async function judge(e,kind,text){
 async function warning(e,m,kind,reason,deleted=false){
  const c=String(m.chat.id),u=String(m.from.id);
  const n=await e.DB.prepare("INSERT INTO warnings(chat_id,user_id,count,updated) VALUES(?,?,1,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET count=count+1,updated=excluded.updated RETURNING count").bind(c,u,now()).first();
+ await observePunishment(e,m,send);
  const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение "+(deleted?"удалено.":"не удалено.");
  await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,...(deleted?{}:{reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}})});
  await log(e,c,m.message_thread_id,u,deleted?"offtopic_deleted":"offtopic_warned",reason);
@@ -99,6 +102,7 @@ async function moderate(e,m){
    // In release topic, only members of ADMIN_IDS should post. Do not delete.
    await warning(e,m,kind,"Объявления о сборках публикует команда QVK");return;
  }
+ await logAction(e,c,t,m.from.id,"message_seen",kind);
  const rule=assess(kind,text,med);
  if(!text||rule.verdict==="ok")return;
  // Explicit cross-topic evidence does not depend on AI availability.
@@ -106,7 +110,8 @@ async function moderate(e,m){
  let verdict=rule;
  let confirmed=rule.verdict==="offtopic";
  if(!confirmed&&await get(e,c,"ai")==="on"&&e.AI){
-   const ai=await judge(e,kind,text);
+   const context=m.reply_to_message?.text?.slice(0,250)||"";
+   const ai=await judge(e,kind,context?"Ответ на: "+context+"\nСообщение: "+text:text);
    if(ai?.verdict==="offtopic"&&ai.confidence>=0.9)verdict=ai;
  }
  if(verdict.verdict!=="offtopic")return;
@@ -215,6 +220,7 @@ async function handle(e,u){
   for(const member of u.message.new_chat_members||[])await rememberUser(e,u.message.chat.id,member);
  }
  if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&(!String(u.message.text||"").startsWith("/")||String(u.message.text||"").startsWith("/cancel"))&&await dmText(e,u.message,send))return;
+ if(u.message.new_chat_members?.length)await raidJoin(e,u.message,send);
  if(await cleanJoinService(e,u.message))return;
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
  if(await antiSpam(e,u.message))return;
@@ -223,6 +229,8 @@ async function handle(e,u){
 export default {async fetch(req,e,ctx){
  const url=new URL(req.url);
  if(req.method==="GET"&&url.pathname==="/health")return new Response("QVK Moderator ready");
+ if(req.method==="GET"&&url.pathname==="/app")return page();
+ if(url.pathname==="/api/app")return appApi(req,e,analytics);
  if(req.method!=="POST"||url.pathname!=="/webhook")return new Response("Not Found",{status:404});
  if(!e.BOT_TOKEN||!e.WEBHOOK_SECRET||!e.ADMIN_IDS||!e.DB)return new Response("Not configured",{status:503});
  if(req.headers.get("X-Telegram-Bot-Api-Secret-Token")!==e.WEBHOOK_SECRET)return new Response("Unauthorized",{status:401});
