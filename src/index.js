@@ -29,7 +29,7 @@ async function judge(e,kind,text){
 async function warning(e,m,kind,reason,deleted=false){
  const c=String(m.chat.id),u=String(m.from.id);
  const n=await e.DB.prepare("INSERT INTO warnings(chat_id,user_id,count,updated) VALUES(?,?,1,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET count=count+1,updated=excluded.updated RETURNING count").bind(c,u,now()).first();
- const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение "+(deleted?"удалено.":"не удалено.")";
+ const text="💜 "+safe(m.from.first_name||"Участник")+", похоже, эта запись не для ветки «"+LABELS[kind]+"».\nПричина: "+safe(reason)+"\n\n"+GUIDES[kind]+"\n\n⚠️ Предупреждение №"+n.count+". Сообщение "+(deleted?"удалено.":"не удалено.");
  await send(e,m.chat.id,text,{message_thread_id:m.message_thread_id,...(deleted?{}:{reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}})});
  await log(e,c,m.message_thread_id,u,deleted?"offtopic_deleted":"offtopic_warned",reason);
 }
@@ -128,6 +128,16 @@ async function command(e,m){
    return send(e,c,"⚠️ "+why,{message_thread_id:m.message_thread_id});
   }
   return;
+ }
+ if(cmd==="/modcheck"){
+  const thread=String(m.message_thread_id??(m.chat.type==="supergroup"?"1":""));
+  const topic=await e.DB.prepare("SELECT kind FROM topics WHERE chat_id=? AND thread_id=?").bind(c,thread).first();
+  const keys=["enabled","ai","topic_action","self_test","antispam"];
+  const values=await Promise.all(keys.map(k=>get(e,c,k)));
+  const sample="Предлагаю добавить возможность менять цвет интерфейса QVK";
+  const rule=topic?assess(topic.kind,sample):null;
+  const lines=["🔎 QVK Moderator — проверка","chat_id: "+c,"thread_id: "+thread,"ветка: "+(topic?LABELS[topic.kind]:"не привязана"),...keys.map((k,i)=>k+": "+values[i]),"твой ID: "+String(m.from?.id??"нет"),"исключён из проверок: "+String(await exemptInChat(e,c,m.from)),"пример: "+(rule?rule.verdict+" — "+rule.reason:"проверка невозможна без /bind")];
+  return send(e,c,lines.join("\\n").replaceAll("\\n","\n"),{message_thread_id:m.message_thread_id});
  }
  if(cmd==="/debugtopic"){
   const msg="🔎 Диагностика ветки\\nchat_id: "+c+"\\nthread_id: "+String(m.message_thread_id??"отсутствует")+"\\nis_topic_message: "+String(m.is_topic_message??false)+"\\nsender_chat: "+String(m.sender_chat?.id??"нет")+"\\nfrom_id: "+String(m.from?.id??"нет")+"\\n\\nЕсли thread_id отсутствует, проверь, что команда отправлена именно в форуме.";
