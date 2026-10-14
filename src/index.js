@@ -98,12 +98,10 @@ async function moderate(e,m){
  const key=m.media_group_id?"album:"+m.media_group_id:"msg:"+m.message_id;
  const created=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind(c,key,now()).run();
  if(!created.meta?.changes)return;
- if(kind==="releases"){
-   // In release topic, only members of ADMIN_IDS should post. Do not delete.
-   await warning(e,m,kind,"Объявления о сборках публикует команда QVK");return;
- }
+ if(kind==="releases")return; // Questions and replies about releases are allowed; no automatic accusation.
  await logAction(e,c,t,m.from.id,"message_seen",kind);
  const rule=assess(kind,text,med);
+ if(m.reply_to_message)return; // Contextual replies are not automatically punished.
  if(!text||rule.verdict==="ok")return;
  // Explicit cross-topic evidence does not depend on AI availability.
  // AI-only classification never triggers automatic deletion.
@@ -115,7 +113,8 @@ async function moderate(e,m){
    if(ai?.verdict==="offtopic"&&ai.confidence>=0.9)verdict=ai;
  }
  if(verdict.verdict!=="offtopic")return;
- const shouldDelete=confirmed&&await get(e,c,"topic_action")==="delete";
+ if(!confirmed){await log(e,c,t,m.from.id,"ai_review","ИИ предполагает оффтоп, требуется ручная проверка: "+verdict.reason);return;}
+ const shouldDelete=confirmed&&!m.reply_to_message&&await get(e,c,"topic_action")==="delete";
  if(shouldDelete){
    try{
      await api(e,"deleteMessage",{chat_id:m.chat.id,message_id:m.message_id});
