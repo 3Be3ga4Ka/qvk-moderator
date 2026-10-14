@@ -4,7 +4,7 @@ import {discover,dmHome,dmCallback,dmText} from "./dm.js";
 import {rememberUser} from "./people.js";
 import {raidJoin,observePunishment,analytics,setting,logAction} from "./advanced.js";
 import {page,appApi} from "./miniapp.js";
-import {supportMessage} from "./support.js";
+import {supportMessage,autoSupport} from "./support.js";
 import {registerAppeal,requestAppeal} from "./appeals.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
@@ -136,7 +136,7 @@ async function moderate(e,m){
  }
 }
 async function command(e,m){
- const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
+ const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq)(?:@|\s|$)/i.test(String(m.text||"")))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
  if(m.chat.type==="private"&&isAdmin(e,m.from)&&(cmd==="/panel"||cmd==="/groups"||cmd==="/start"))return dmHome(e,c,send);
  if(cmd==="/qvk"||cmd==="/faq"){const question=String(m.text||"").replace(/^\/\w+(?:@\w+)?\s*/,"").trim();return supportMessage(e,m,question,isAdmin(e,m.from),send);}
@@ -239,6 +239,7 @@ async function handle(e,u){
  if(await cleanJoinService(e,u.message))return;
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
  if(await antiSpam(e,u.message))return;
+ await autoSupport(e,u.message,send);
  return moderate(e,u.message);
 }
 export default {async fetch(req,e,ctx){
