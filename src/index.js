@@ -1,5 +1,6 @@
 import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
+import {discover,dmHome,dmCallback,dmText} from "./dm.js";
 const S={enabled:"on",ai:"on",join_cleanup:"on",antispam:"on",spam_action:"warn",links:"on",topic_action:"delete",self_test:"on"};
 const now=()=>Math.floor(Date.now()/1000);
 const safe=s=>String(s??"").slice(0,150);
@@ -121,6 +122,7 @@ async function moderate(e,m){
 async function command(e,m){
  const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
+ if(m.chat.type==="private"&&isAdmin(e,m.from)&&(cmd==="/panel"||cmd==="/groups"||cmd==="/start"))return dmHome(e,c,send);
  if(cmd==="/start"||cmd==="/help"){await send(e,c,"💜 QVK Moderator\n\n"+rulesText()+"\n\nДля админов: /panel, /topics, /stats, /bind bugs|ideas|badges|chat|releases, /enable, /disable, /ai_on, /ai_off, /joins_on, /joins_off, /spam_on, /spam_off, /links_on, /links_off, /spam_warn, /spam_delete, /topic_delete, /topic_warn, /selftest_on, /selftest_off",{message_thread_id:m.message_thread_id});return;}
  if(!isAdmin(e,m.from)){
   if(cmd==="/bind"||cmd==="/debugtopic") {
@@ -178,6 +180,10 @@ async function command(e,m){
 }
 async function callback(e,q){
  const m=q.message;if(!m)return;
+ if(q.data?.startsWith("dm:")){
+  if(!isAdmin(e,q.from))return api(e,"answerCallbackQuery",{callback_query_id:q.id,text:"Недостаточно прав",show_alert:true});
+  return dmCallback(e,q,send,(env,id)=>api(env,"answerCallbackQuery",{callback_query_id:id}));
+ }
  try{
   if(!isAdmin(e,q.from))return;
   if(e.CHAT_ID&&m.chat.type!=="private"&&String(m.chat.id)!==String(e.CHAT_ID))return;
@@ -200,7 +206,10 @@ async function handle(e,u){
  const k=String(u.update_id??"");
  if(k){const r=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind("_updates",k,now()).run();if(!r.meta?.changes)return;}
  if(u.callback_query)return callback(e,u.callback_query);
+ if(u.my_chat_member?.chat?.type==="supergroup")await discover(e,{chat:u.my_chat_member.chat});
  if(!u.message)return;
+ await discover(e,u.message);
+ if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&!String(u.message.text||"").startsWith("/")&&await dmText(e,u.message,send))return;
  if(await cleanJoinService(e,u.message))return;
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
  if(await antiSpam(e,u.message))return;
