@@ -19,10 +19,11 @@ export function selectArticle(articles,query,isAdmin=false){
 }
 export function compose(article,previous="",maxSteps=3){
  const a=article||fallback;
- const prev=normalize(previous);
- const choices=(a.steps||[]).filter(step=>{
+
+ const seen=new Set(String(previous||"").split("|").filter(Boolean));
+ const choices=(a.steps||[]).filter(step=>seen.size? !seen.has(step):true).filter(step=>{
   const words=normalize(step).split(" ").filter(w=>w.length>5);
-  return !words.some(w=>prev.includes(w))&&!/(?:не помогло|пробовал|уже включено|уже сделал)/i.test(previous)&&words.length>0;
+  return words.length>0;
  }).slice(0,maxSteps);
  const head=String(a.answer||fallback.answer).slice(0,430);
  const parts=[head,...choices.map((s,i)=>(i+1)+". "+s)];
@@ -45,7 +46,7 @@ export async function supportMessage(e,m,query,isAdmin,send){
  const prevText=repeated?state.steps||"":"";
  const answer=compose(chosen,prevText);
  await send(e,c,answer,{message_thread_id:m.message_thread_id});
- await e.DB.prepare("INSERT INTO settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value").bind(c,key,JSON.stringify({id:chosen.id,query:normalize(query),steps:(prevText+" "+(chosen.steps||[]).join(" ")).slice(-1000),time:Date.now()})).run();
+ await e.DB.prepare("INSERT INTO settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value").bind(c,key,JSON.stringify({id:chosen.id,query:normalize(query),steps:[...new Set([...String(prevText).split("|").filter(Boolean),...(chosen.steps||[]).slice(0,3)])].join("|").slice(-1000),time:Date.now()})).run();
  return true;
 }
 
@@ -87,9 +88,15 @@ export async function autoSupport(e,m,send){
  const claimed=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind(c,groupKey,now).run();
  if(!claimed.meta?.changes)return false;
  await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind(c,userKey,now).run();
- const answer=compose(chosen);
+ const memoryKey="support:"+u;
+ const previous=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(c,memoryKey).first();
+ let state={};try{state=JSON.parse(previous?.value||"{}")}catch{}
+ const recent=state.id===chosen.id&&Date.now()-Number(state.time||0)<7*86400000;
+ const answer=compose(chosen,recent?state.steps||"":"");
  try{
   await send(e,c,"💜 QVK Помощник\n"+answer,{message_thread_id:m.message_thread_id,reply_parameters:{message_id:m.message_id,allow_sending_without_reply:true}});
+  await e.DB.prepare("INSERT INTO settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value").bind(c,memoryKey,JSON.stringify({id:chosen.id,query:normalize(body),steps:[...new Set([...(recent?String(state.steps||"").split("|").filter(Boolean):[]),...(chosen.steps||[]).slice(0,3)])].join("|").slice(-1000),time:Date.now()})).run();
+  await e.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(c,thread,u,"faq_answered",chosen.id,now).run();
   return true;
  }catch(err){console.error("Automatic FAQ",String(err));return false}
 }
