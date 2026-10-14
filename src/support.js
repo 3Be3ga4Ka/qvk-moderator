@@ -31,8 +31,8 @@ export function compose(article,previous="",maxSteps=3){
  return parts.join("\n\n").slice(0,950);
 }
 export async function supportMessage(e,m,query,isAdmin,send){
- if(!e.QVK_KB){await send(e,m.chat.id,"База знаний ещё не подключена владельцем. Для помощи укажи версию QVK, Android и описание проблемы.",{message_thread_id:m.message_thread_id});return true;}
- const raw=await e.QVK_KB.get("support_kb");
+ const row=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind("_registry","support_kb").first();
+ const raw=row?.value;
  if(!raw){await send(e,m.chat.id,"База знаний пока не загружена владельцем.",{message_thread_id:m.message_thread_id});return true;}
  let kb;try{kb=JSON.parse(raw)}catch{return false;}
  const c=String(m.chat.id),u=String(m.from?.id||""),key="support:"+u;
