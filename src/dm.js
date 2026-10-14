@@ -38,7 +38,7 @@ async function dmGroup(env,chat,id,send){
  const r=await env.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+id).first();
  if(!r)return send(env,chat,"Группа не зарегистрирована. Отправь /panel внутри группы.");
  const name=JSON.parse(r.value).title;
- await send(env,chat,"⚙️ "+label(name)+"\nГруппа: "+id+"\nВыбирай раздел:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
+ await send(env,chat,"⚙️ "+label(name)+"\nГруппа: "+id+"\nВыбирай раздел:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
 }
 async function dmTopics(env,chat,id,send){
  const arr=await topics(env,id);
@@ -58,6 +58,31 @@ async function dmSettings(env,chat,id,send){
  rows.push([b("🧭 Оффтоп: "+(vals.topic_action||"delete"),"dm:toggle:"+id+":topic_action")],[b("🛡 Реакция на спам: "+(vals.spam_action||"warn"),"dm:toggle:"+id+":spam_action")],[b("⬅️ Группа","dm:g:"+id)]);
  await send(env,chat,"⚙️ Настройки группы "+id+"\nКнопки переключают параметры:",{reply_markup:kb(rows)});
 }
+async function dmStats(env,chat,id,send){
+ const count=await env.DB.prepare("SELECT COALESCE(SUM(count),0) n FROM warnings WHERE chat_id=?").bind(id).first();
+ const total=await env.DB.prepare("SELECT COUNT(*) n FROM events WHERE chat_id=? AND ts>=?").bind(id,Math.floor(Date.now()/1000)-86400).first();
+ const rows=await env.DB.prepare("SELECT action,COUNT(*) n FROM events WHERE chat_id=? GROUP BY action ORDER BY n DESC LIMIT 12").bind(id).all();
+ const info=rows.results.map(x=>label(x.action,35)+": "+x.n).join("\\n");
+ await send(env,chat,["📊 Статистика группы",id,"Предупреждений всего: "+(count?.n||0),"Событий за 24 часа: "+(total?.n||0),info||"Событий пока нет"].join("\\n").replaceAll("\\n","\n"),{reply_markup:kb([[b("📜 Журнал","dm:logs:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
+}
+async function dmLogs(env,chat,id,send){
+ const rows=await env.DB.prepare("SELECT action,thread_id,user_id,reason,ts FROM events WHERE chat_id=? ORDER BY id DESC LIMIT 15").bind(id).all();
+ const events=rows.results.map(x=>{
+  const when=new Date(x.ts*1000).toISOString().slice(0,16).replace("T"," ");
+  return when+" UTC · "+label(x.action,30)+"\n↳ ветка "+label(x.thread_id,15)+", пользователь "+label(x.user_id,20)+"\n"+label(x.reason,110);
+ });
+ await send(env,chat,"📜 Последние 15 действий\n"+(events.length?events.join("\n\n"):"Пока нет записей."),{reply_markup:kb([[b("🔄 Обновить","dm:logs:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
+}
+async function dmRights(env,chat,id,send){
+ try{
+  const bot=await fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getMe").then(r=>r.json());
+  if(!bot.ok)throw Error(bot.description||"getMe failed");
+  const raw=await fetch("https://api.telegram.org/bot"+env.BOT_TOKEN+"/getChatMember",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:id,user_id:bot.result.id})}).then(r=>r.json());
+  if(!raw.ok)throw Error(raw.description||"getChatMember failed");
+  const p=raw.result;
+  await send(env,chat,["🩺 Права бота", "Статус: "+p.status, "Удалять сообщения: "+(p.can_delete_messages?"✅":"❌"),"Ограничивать участников: "+(p.can_restrict_members?"✅":"❌"),"Управлять темами: "+(p.can_manage_topics?"✅":"❌"),"Чтобы бот удалял оффтоп, ему нужно право удалять сообщения."].join("\n"),{reply_markup:kb([[b("🔄 Проверить снова","dm:rights:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
+ }catch(err){await send(env,chat,"Не удалось проверить права: "+label(err.message));}
+}
 export async function dmCallback(env,q,send,ack){
  if(q.message?.chat?.type!=="private"||!q.data?.startsWith("dm:"))return false;
  const [_,action,id,t,k]=q.data.split(":");
@@ -67,6 +92,9 @@ export async function dmCallback(env,q,send,ack){
   else if(action==="t")await dmTopics(env,q.message.chat.id,id,send);
   else if(action==="k")await dmKinds(env,q.message.chat.id,id,t,send);
   else if(action==="s")await dmSettings(env,q.message.chat.id,id,send);
+  else if(action==="stats")await dmStats(env,q.message.chat.id,id,send);
+  else if(action==="logs")await dmLogs(env,q.message.chat.id,id,send);
+  else if(action==="rights")await dmRights(env,q.message.chat.id,id,send);
   else if(action==="a"){
    if(!Object.hasOwn(LABELS,k)&&k!=="none")throw Error("Неизвестный тип");
    if(k==="none")await env.DB.prepare("DELETE FROM topics WHERE chat_id=? AND thread_id=?").bind(id,t).run();
