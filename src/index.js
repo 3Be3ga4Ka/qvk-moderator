@@ -16,7 +16,7 @@ async function log(e,c,t,u,a,reason=""){await e.DB.prepare("INSERT INTO events(c
 async function topics(e,c){const r=await e.DB.prepare("SELECT kind,thread_id FROM topics WHERE chat_id=? ORDER BY kind").bind(String(c)).all();return "📋 Ветки QVK:\n"+(r.results.length?r.results.map(x=>LABELS[x.kind]+" — "+x.thread_id).join("\n"):"Пока не привязаны. Используй /bind внутри ветки.");}
 async function stats(e,c){const r=await e.DB.prepare("SELECT COALESCE(SUM(count),0) n FROM warnings WHERE chat_id=?").bind(String(c)).first();const q=await e.DB.prepare("SELECT action,COUNT(*) n FROM events WHERE chat_id=? GROUP BY action").bind(String(c)).all();return "📊 Предупреждений: "+r.n+"\n"+q.results.map(x=>x.action+": "+x.n).join("\n");}
 const menu={inline_keyboard:[[{text:"📋 Ветки",callback_data:"topics"},{text:"📊 Статистика",callback_data:"stats"}],[{text:"✅ Включить",callback_data:"enable"},{text:"⏸ Отключить",callback_data:"disable"}],[{text:"🧠 ИИ вкл",callback_data:"ai_on"},{text:"🧠 ИИ выкл",callback_data:"ai_off"}],[{text:"🧹 Приветствия: вкл",callback_data:"join_on"},{text:"🧹 Приветствия: выкл",callback_data:"join_off"}],[{text:"🛡 Антиспам: вкл",callback_data:"spam_on"},{text:"🛡 Выкл",callback_data:"spam_off"}],[{text:"🔗 Ссылки: вкл",callback_data:"links_on"},{text:"🔗 Выкл",callback_data:"links_off"}],[{text:"⚠️ Только предупреждать",callback_data:"action_warn"},{text:"🗑 Удалять явный спам",callback_data:"action_delete"}],[{text:"🧭 Оффтоп: удалять",callback_data:"topic_delete"},{text:"🧭 Предупреждать",callback_data:"topic_warn"}],[{text:"🧪 Мой тест: вкл",callback_data:"self_on"},{text:"🧪 Выкл",callback_data:"self_off"}],[{text:"📖 Правила",callback_data:"rules"}]]};
-const rulesText=()=>Object.entries(GUIDES).map(([k,v])=>LABELS[k]+"\n"+v).join("\n\n")+"\n\nБот только предупреждает; ничего не удаляет.";
+const rulesText=()=>Object.entries(GUIDES).map(([k,v])=>LABELS[k]+"\n"+v).join("\n\n")+"\n\nЯвный оффтоп может удаляться с предупреждением; настройки доступны в /panel.";
 async function judge(e,kind,text){
  if(!e.AI||!text)return null;
  try{
@@ -209,7 +209,7 @@ async function handle(e,u){
  if(u.my_chat_member?.chat?.type==="supergroup")await discover(e,{chat:u.my_chat_member.chat});
  if(!u.message)return;
  await discover(e,u.message);
- if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&!String(u.message.text||"").startsWith("/")&&await dmText(e,u.message,send))return;
+ if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&(!String(u.message.text||"").startsWith("/")||String(u.message.text||"").startsWith("/cancel"))&&await dmText(e,u.message,send))return;
  if(await cleanJoinService(e,u.message))return;
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
  if(await antiSpam(e,u.message))return;
