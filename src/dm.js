@@ -1,4 +1,5 @@
 import {LABELS} from "./rules.js";
+import {person,personLabel,actionLabel} from "./people.js";
 const label=(s,n=55)=>String(s||"").replace(/[\r\n]/g," ").slice(0,n);
 export const isGroup=m=>["supergroup","group"].includes(m?.chat?.type);
 export async function discover(env,m){
@@ -27,6 +28,8 @@ async function topics(env,id){
 }
 const b=(text,data)=>({text,callback_data:data});
 const kb=rows=>({inline_keyboard:rows});
+async function groupName(e,id){const x=await e.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+id).first();try{return JSON.parse(x?.value||"{}").title||"Группа QVK";}catch{return "Группа QVK";}}
+async function topicName(e,id,thread){if(!thread)return "Общая";const x=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(id,"topic:"+thread).first();return x?.value||"Ветка #"+thread;}
 const settings=[["enabled","Модерация"],["ai","ИИ"],["antispam","Антиспам"],["links","Проверка ссылок"],["join_cleanup","Очистка вступлений"],["self_test","Самопроверка"]];
 export async function dmHome(env,chat,send){
  const g=await groups(env);
@@ -38,40 +41,42 @@ async function dmGroup(env,chat,id,send){
  const r=await env.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+id).first();
  if(!r)return send(env,chat,"Группа не зарегистрирована. Отправь /panel внутри группы.");
  const name=JSON.parse(r.value).title;
- await send(env,chat,"⚙️ "+label(name)+"\nГруппа: "+id+"\nВыбирай раздел:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[b("👤 Участники и наказания","dm:users:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
+ await send(env,chat,"💜 QVK Moderator\n\n👥 "+label(name)+"\n\nВыбери раздел управления:",{reply_markup:kb([[b("🗂 Ветки и назначение правил","dm:t:"+id)],[b("⚙️ Переключатели","dm:s:"+id)],[b("📊 Статистика","dm:stats:"+id),b("📜 Журнал","dm:logs:"+id)],[b("🩺 Права бота","dm:rights:"+id)],[b("👤 Участники и наказания","dm:users:"+id)],[b("➕ Добавить ветку вручную","dm:new:"+id)],[b("⬅️ Все группы","dm:home")]])});
 }
 async function dmTopics(env,chat,id,send){
  const arr=await topics(env,id);
  const rows=arr.map(x=>[b(label(x.title,24)+" · "+(LABELS[x.kind]||"Без правил"),"dm:k:"+id+":"+x.thread_id)]);
  rows.push([b("➕ Ветка по ID","dm:new:"+id)],[b("⬅️ Группа","dm:g:"+id)]);
- await send(env,chat,"🗂 Ветки группы "+id+"\n"+(arr.length?"Нажми на ветку, чтобы назначить правила.":"Пока ветки не обнаружены. Напиши любое сообщение в каждой ветке или добавь её ID вручную."),{reply_markup:kb(rows)});
+ await send(env,chat,"🗂 Ветки · "+label(await groupName(env,id))+"\n\n"+(arr.length?"Нажми на ветку, чтобы назначить правила.":"Пока ветки не обнаружены. Напиши любое сообщение в каждой ветке или добавь её ID вручную."),{reply_markup:kb(rows)});
 }
 async function dmKinds(env,chat,id,t,send){
  const rows=Object.entries(LABELS).map(([k,l])=>[b(l,"dm:a:"+id+":"+t+":"+k)]);
  rows.push([b("🚫 Без тематических правил","dm:a:"+id+":"+t+":none")],[b("✏️ Изменить название","dm:rename:"+id+":"+t)],[b("⬅️ Ветки","dm:t:"+id)]);
- await send(env,chat,"🧭 Настроить ветку #"+t+"\nВыбери назначение:",{reply_markup:kb(rows)});
+ await send(env,chat,"🧭 "+label(await topicName(env,id,t))+"\n\nВыбери назначение ветки:",{reply_markup:kb(rows)});
 }
 async function dmSettings(env,chat,id,send){
  const r=await env.DB.prepare("SELECT key,value FROM settings WHERE chat_id=?").bind(id).all();
  const vals=Object.fromEntries(r.results.map(x=>[x.key,x.value]));
  const rows=settings.map(([k,name])=>[b((vals[k]??(k==="self_test"?"on":"on"))==="on"?"✅ "+name:"⏸ "+name,"dm:toggle:"+id+":"+k)]);
  rows.push([b("🧭 Оффтоп: "+(vals.topic_action||"delete"),"dm:toggle:"+id+":topic_action")],[b("🛡 Реакция на спам: "+(vals.spam_action||"warn"),"dm:toggle:"+id+":spam_action")],[b("⬅️ Группа","dm:g:"+id)]);
- await send(env,chat,"⚙️ Настройки группы "+id+"\nКнопки переключают параметры:",{reply_markup:kb(rows)});
+ await send(env,chat,"⚙️ Настройки · "+label(await groupName(env,id))+"\n\nНажми, чтобы изменить состояние:",{reply_markup:kb(rows)});
 }
 async function dmStats(env,chat,id,send){
  const count=await env.DB.prepare("SELECT COALESCE(SUM(count),0) n FROM warnings WHERE chat_id=?").bind(id).first();
  const total=await env.DB.prepare("SELECT COUNT(*) n FROM events WHERE chat_id=? AND ts>=?").bind(id,Math.floor(Date.now()/1000)-86400).first();
  const rows=await env.DB.prepare("SELECT action,COUNT(*) n FROM events WHERE chat_id=? GROUP BY action ORDER BY n DESC LIMIT 12").bind(id).all();
- const info=rows.results.map(x=>label(x.action,35)+": "+x.n).join("\\n");
- await send(env,chat,["📊 Статистика группы",id,"Предупреждений всего: "+(count?.n||0),"Событий за 24 часа: "+(total?.n||0),info||"Событий пока нет"].join("\\n").replaceAll("\\n","\n"),{reply_markup:kb([[b("📜 Журнал","dm:logs:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
+ const info=rows.results.map(x=>(actionLabel[x.action]||"▫️ "+label(x.action,35))+": "+x.n).join("\\n");
+ await send(env,chat,["📊 Статистика · "+label(await groupName(env,id)),"","⚠️ Всего предупреждений: "+(count?.n||0),"🕘 Действий за сутки: "+(total?.n||0),"","По категориям:",info||"Пока нет событий"].join("\\n").replaceAll("\\n","\n"),{reply_markup:kb([[b("📜 Журнал","dm:logs:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
 }
 async function dmLogs(env,chat,id,send){
  const rows=await env.DB.prepare("SELECT action,thread_id,user_id,reason,ts FROM events WHERE chat_id=? ORDER BY id DESC LIMIT 15").bind(id).all();
- const events=rows.results.map(x=>{
-  const when=new Date(x.ts*1000).toISOString().slice(0,16).replace("T"," ");
-  return when+" UTC · "+label(x.action,30)+"\n↳ ветка "+label(x.thread_id,15)+", пользователь "+label(x.user_id,20)+"\n"+label(x.reason,110);
- });
- await send(env,chat,"📜 Последние 15 действий\n"+(events.length?events.join("\n\n"):"Пока нет записей."),{reply_markup:kb([[b("🔄 Обновить","dm:logs:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
+ const events=await Promise.all(rows.results.map(async x=>{
+  const when=new Date(x.ts*1000).toISOString().slice(5,16).replace("T"," · ")+" UTC";
+  const name=x.user_id?personLabel(await person(env,id,x.user_id),x.user_id):"Система";
+  const thread=await topicName(env,id,x.thread_id);
+  return "• "+(actionLabel[x.action]||label(x.action))+"\n"+when+"\n👤 "+label(name,65)+"\n🗂 "+label(thread,65)+(x.reason?"\n↳ "+label(x.reason,125):"");
+ }));
+ await send(env,chat,"📜 Журнал · "+label(await groupName(env,id))+"\n\n"+(events.length?events.join("\n\n"):"Пока нет записей."),{reply_markup:kb([[b("🔄 Обновить","dm:logs:"+id)],[b("⬅️ Группа","dm:g:"+id)]])});
 }
 async function dmRights(env,chat,id,send){
  try{
@@ -85,15 +90,16 @@ async function dmRights(env,chat,id,send){
 }
 async function dmUsers(env,chat,id,send){
  const r=await env.DB.prepare("SELECT w.user_id,w.count FROM warnings w WHERE w.chat_id=? AND w.count>0 ORDER BY w.updated DESC LIMIT 20").bind(id).all();
- const rows=r.results.map(x=>[b("👤 "+x.user_id+" · ⚠️ "+x.count,"dm:user:"+id+":"+x.user_id)]);
+ const rows=await Promise.all(r.results.map(async x=>[b("👤 "+label(personLabel(await person(env,id,x.user_id),x.user_id),39)+" · ⚠️ "+x.count,"dm:user:"+id+":"+x.user_id)]));
  rows.push([b("🔎 Ввести ID участника","dm:find:"+id)],[b("⬅️ Группа","dm:g:"+id)]);
- await send(env,chat,"👤 Участники и предупреждения\nВыбери участника. Бот не выдаёт мут автоматически.",{reply_markup:kb(rows)});
+ await send(env,chat,"👥 Участники · "+label(await groupName(env,id))+"\n\nВыбери участника для просмотра нарушений.\nМуты выдаются только вручную.",{reply_markup:kb(rows)});
 }
 async function dmUser(env,chat,id,user,send){
  if(!/^\d{1,20}$/.test(String(user)))throw Error("Неверный Telegram ID");
  const r=await env.DB.prepare("SELECT count FROM warnings WHERE chat_id=? AND user_id=?").bind(id,user).first();
  const count=r?.count||0;
- await send(env,chat,"👤 Участник "+user+"\n⚠️ Предупреждений: "+count+"\nДействия выполняются вручную администратором.",{reply_markup:kb([[b("➖ Снять 1 предупреждение","dm:clear:"+id+":"+user)],[b("🔇 Мут 1 час","dm:mute60:"+id+":"+user),b("🔇 24 часа","dm:mute1440:"+id+":"+user)],[b("🔊 Снять мут","dm:unmute:"+id+":"+user)],[b("⬅️ Участники","dm:users:"+id)]])});
+ const p=await person(env,id,user);
+ await send(env,chat,"👤 "+personLabel(p,user,true)+"\n\n⚠️ Предупреждений: "+count+"\n\nВыбери действие администратора:",{reply_markup:kb([[b("➖ Снять 1 предупреждение","dm:clear:"+id+":"+user)],[b("🔇 Мут 1 час","dm:mute60:"+id+":"+user),b("🔇 24 часа","dm:mute1440:"+id+":"+user)],[b("🔊 Снять мут","dm:unmute:"+id+":"+user)],[b("⬅️ Участники","dm:users:"+id)]])});
 }
 async function dmPunish(env,q,action,id,user,send){
  if(!/^[-]\d+$/.test(id)||!/^\d{1,20}$/.test(user))throw Error("Неправильный ID");
