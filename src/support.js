@@ -53,7 +53,7 @@ export function matchAutomatic(articles,query){
  const text=normalize(query);
  if(text.length<13||text.length>1200||!/[а-яa-z]/i.test(text))return null;
  const tokens=text.split(" ").filter(w=>w.length>3);
- if(tokens.length<3)return null;
+ if(text.split(" ").filter(Boolean).length<3)return null;
  const candidates=articles.filter(x=>x.status!=="admin_only").flatMap(x=>{
   const phrases=(x.triggers||[]).map(normalize).filter(t=>t.length>=11&&t.split(" ").length>=2);
   const phrase=phrases.filter(t=>text.includes(t)).sort((a,b)=>b.length-a.length)[0];
