@@ -1,5 +1,5 @@
-export async function registerAppeal(e,chat,messageId,user,thread,reason){
- const value=JSON.stringify({user:String(user),thread:String(thread||""),reason:String(reason||"").slice(0,150),status:"eligible",created:Date.now()});
+export async function registerAppeal(e,chat,messageId,user,thread,reason,counted=true){
+ const value=JSON.stringify({user:String(user),thread:String(thread||""),reason:String(reason||"").slice(0,150),counted,status:"eligible",created:Date.now()});
  await e.DB.prepare("INSERT OR IGNORE INTO settings(chat_id,key,value) VALUES(?,?,?)").bind(String(chat),"appeal:"+messageId,value).run();
 }
 export async function requestAppeal(e,q){
@@ -34,7 +34,7 @@ export async function decide(e,chat,id,decision,admin){
  const next=JSON.stringify({...item,status:decision==="approve"?"approved":"rejected",decidedBy:String(admin),decided:Date.now()});
  const changed=await e.DB.prepare("UPDATE settings SET value=? WHERE chat_id=? AND key=? AND value=?").bind(next,String(chat),key,old.value).run();
  if(!changed.meta?.changes)throw Error("Решение уже принято");
- if(decision==="approve"){
+ if(decision==="approve"&&item.counted!==false){
   await e.DB.prepare("UPDATE warnings SET count=MAX(0,count-1),updated=? WHERE chat_id=? AND user_id=?").bind(Math.floor(Date.now()/1000),String(chat),item.user).run();
  }
  await e.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(String(chat),item.thread,item.user,decision==="approve"?"appeal_approved":"appeal_rejected","Рассмотрено администратором "+admin,Math.floor(Date.now()/1000)).run();
