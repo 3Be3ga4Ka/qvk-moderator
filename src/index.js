@@ -1,3 +1,4 @@
+import {roleFor,assignRole,roleOptions} from "./roles.js";
 import {sendPng,editPng} from "./reputation_png.js";
 import {repCard,repTopCard,cardButtons} from "./reputation_cards.js";
 import {setupRep,repMode,addRep,getRep,topRep} from "./reputation.js";
@@ -142,9 +143,27 @@ async function moderate(e,m){
  }
 }
 async function command(e,m){
- const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq|ticket|bug|rep|rep_me|rep_top|rep_setup|rep_add)(?:@|\s|$)/i.test(String(m.text||"")))return;
+ const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq|ticket|bug|rep|rep_me|rep_top|rep_setup|rep_add|role|role_set|roles)(?:@|\s|$)/i.test(String(m.text||"")))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
  if(m.chat.type==="private"&&isAdmin(e,m.from)&&(cmd==="/panel"||cmd==="/groups"||cmd==="/start"))return dmHome(e,c,send);
+ if(["/role","/roles","/role_set"].includes(cmd)){
+  if(!["group","supergroup"].includes(m.chat.type)||!m.from||m.from.is_bot||m.sender_chat)return;
+  const reply=async text=>send(e,c,text,{message_thread_id:m.message_thread_id});
+  try{
+   const mode=await repMode(e,c);
+   if(!mode)return reply("Сначала настрой тип группы: /rep_setup testers или /rep_setup users");
+   if(cmd==="/roles")return reply("🏷 Роли QVK · "+(mode==="testers"?"тестировщики":"сообщество")+"\n"+roleOptions(mode)+"\n\nНазначение: /role_set curator или /role_set vip ответом на сообщение. Сброс: /role_set auto");
+   const target=cmd==="/role"&&m.reply_to_message?.from&&!m.reply_to_message.sender_chat?m.reply_to_message.from:cmd==="/role"?m.from:m.reply_to_message?.from;
+   if(!target||target.is_bot||m.reply_to_message?.sender_chat&&cmd==="/role_set")return reply("Ответь командой на сообщение участника");
+   if(target.first_name||target.username)await rememberUser(e,c,target);
+   if(cmd==="/role_set"){
+    const key=String(m.text||"").trim().split(/\s+/)[1]||"";
+    await assignRole(e,c,m.from.id,target.id,mode,key);
+   }
+   const score=await getRep(e,c,target.id),role=await roleFor(e,c,target.id,mode,score),profile=await person(e,c,target.id);
+   return reply("🏷 Роль "+(profile.name||target.first_name||"участника")+": "+role.name+"\nТег: #"+role.tag+"\nРепутация: "+score);
+  }catch(err){return reply("⚠️ "+safe(err.message));}
+ }
  if(["/rep_setup","/rep","/rep_add","/rep_me","/rep_top"].includes(cmd)){
   if(!["group","supergroup"].includes(m.chat.type)||!m.from||m.from.is_bot||m.sender_chat)return;
   const answer=async text=>send(e,c,text,{message_thread_id:m.message_thread_id});
@@ -158,7 +177,7 @@ async function command(e,m){
    if(!mode)return answer("Репутация здесь пока не настроена. Владелец: /rep_setup testers или /rep_setup users");
    if(cmd==="/rep_top"){
     const ranking=await topRep(e,c);
-    const named=await Promise.all(ranking.map(async x=>({...x,...await person(e,c,x.user_id)})));
+    const named=await Promise.all(ranking.map(async x=>({...x,...await person(e,c,x.user_id),role:await roleFor(e,c,x.user_id,mode,x.score)})));
     const result=await send(e,c,repTopCard(mode,named),{message_thread_id:m.message_thread_id,parse_mode:"HTML"});await queueRepCleanup(e,c,[m.message_id,result.message_id]);return result;
    }
    if(cmd==="/rep_me"||cmd==="/rep"){
@@ -167,7 +186,7 @@ async function command(e,m){
     const profile=await person(e,c,target.id);
     const score=await getRep(e,c,target.id);
     const ranking=await topRep(e,c),rank=ranking.findIndex(x=>String(x.user_id)===String(target.id));
-    if(cmd==="/rep_me"||cmd==="/rep"){const result=await sendPng(e,c,mode,{...profile,id:target.id},score,rank>=0?rank+1:null,{message_thread_id:m.message_thread_id,reply_markup:cardButtons(target.id)});await queueRepCleanup(e,c,[m.message_id,result.message_id]);return result;}
+    if(cmd==="/rep_me"||cmd==="/rep"){const role=await roleFor(e,c,target.id,mode,score);const result=await sendPng(e,c,mode,{...profile,id:target.id,role},score,rank>=0?rank+1:null,{message_thread_id:m.message_thread_id,reply_markup:cardButtons(target.id)});await queueRepCleanup(e,c,[m.message_id,result.message_id]);return result;}
    }
    const target=m.reply_to_message?.from;
    if(!target||target.is_bot||m.reply_to_message.sender_chat)return answer("Ответь командой на сообщение обычного участника.");
@@ -261,7 +280,8 @@ async function callback(e,q){
    }else{text="🔄 Обновлено";}
    const profile=await person(e,m.chat.id,target),score=await getRep(e,m.chat.id,target);
    const ranking=await topRep(e,m.chat.id),rank=ranking.findIndex(x=>String(x.user_id)===target);
-   await editPng(e,m.chat.id,m.message_id,mode,{...profile,id:target},score,rank>=0?rank+1:null,cardButtons(target));
+   const role=await roleFor(e,m.chat.id,target,mode,score);
+   await editPng(e,m.chat.id,m.message_id,mode,{...profile,id:target,role},score,rank>=0?rank+1:null,cardButtons(target));
    if(pieces[0]==="rc")text="✅ Обновлено";
   }catch(err){text="⚠️ "+safe(err.message)}
   return api(e,"answerCallbackQuery",{callback_query_id:q.id,text,show_alert:text.startsWith("⚠️")});
