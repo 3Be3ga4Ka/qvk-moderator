@@ -1,3 +1,4 @@
+import {setupRep,repMode,addRep,getRep,topRep} from "./reputation.js";
 import {pluginAction} from "./plugin_actions.js";
 import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
@@ -138,9 +139,38 @@ async function moderate(e,m){
  }
 }
 async function command(e,m){
- const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq|ticket|bug)(?:@|\s|$)/i.test(String(m.text||"")))return;
+ const c=String(m.chat.id);if(e.CHAT_ID&&m.chat.type!=="private"&&c!==String(e.CHAT_ID)&&!/^\/(?:qvk|faq|ticket|bug|rep|rep_me|rep_top|rep_setup|rep_add)(?:@|\s|$)/i.test(String(m.text||"")))return;
  const cmd=String(m.text||"").split(/\s+/)[0].split("@")[0].toLowerCase();
  if(m.chat.type==="private"&&isAdmin(e,m.from)&&(cmd==="/panel"||cmd==="/groups"||cmd==="/start"))return dmHome(e,c,send);
+ if(["/rep_setup","/rep","/rep_add","/rep_me","/rep_top"].includes(cmd)){
+  if(!["group","supergroup"].includes(m.chat.type)||!m.from||m.from.is_bot||m.sender_chat)return;
+  const answer=async text=>send(e,c,text,{message_thread_id:m.message_thread_id});
+  try{
+   if(cmd==="/rep_setup"){
+    const mode=String(m.text||"").trim().split(/\s+/)[1]||"";
+    await setupRep(e,c,mode,m.from.id);
+    return answer("✅ Репутация группы настроена: "+(mode==="testers"?"🏆 тестировщики — баллы выдаёт только владелец":"💜 пользователи — взаимные плюсы"));
+   }
+   const mode=await repMode(e,c);
+   if(!mode)return answer("Репутация здесь пока не настроена. Владелец: /rep_setup testers или /rep_setup users");
+   if(cmd==="/rep_top"){
+    const ranking=await topRep(e,c);
+    return answer((mode==="testers"?"🏆 Репутация тестировщиков":"💜 Репутация участников")+"\n"+(ranking.length?ranking.map((x,i)=>(i+1)+". ID "+x.user_id+" — "+x.score).join("\n"):"Пока нет оценок"));
+   }
+   if(cmd==="/rep_me"||cmd==="/rep"&&!m.reply_to_message){
+    const user=m.from.id,score=await getRep(e,c,user);
+    return answer((mode==="testers"?"🏆 Репутация тестировщика":"💜 Репутация пользователя")+": "+score+"\nID "+user);
+   }
+   const target=m.reply_to_message?.from;
+   if(!target||target.is_bot||m.reply_to_message.sender_chat)return answer("Ответь командой на сообщение обычного участника.");
+   const raw=String(m.text||"").trim().split(/\s+/)[1];
+   const amount=cmd==="/rep_add"?Number(raw||1):1;
+   if(cmd==="/rep_add"&&mode!=="testers")return answer("В группе пользователей используется /rep ответом на сообщение (+1).");
+   if(cmd==="/rep"&&mode==="testers")return answer("Баллы тестировщикам выдаёт только владелец: /rep_add 1–5 в ответ на сообщение.");
+   const result=await addRep(e,{chat:c,actor:m.from.id,target:target.id,sourceMessage:m.message_id,amount});
+   return answer(result.added?"✅ +"+amount+" к репутации ID "+target.id:"ℹ️ Уже оценено. Пользователи могут поставить +1 этому человеку раз в сутки.");
+  }catch(err){return answer("⚠️ "+safe(err.message));}
+ }
  if(cmd==="/ticket"||cmd==="/bug"){
   if(!["group","supergroup"].includes(m.chat.type)||!m.from||m.from.is_bot)return;
   const description=String(m.text||"").replace(/^\/\w+(?:@\w+)?\s*/,"").trim();
