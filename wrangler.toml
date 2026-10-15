@@ -12,3 +12,14 @@ binding = "AI"
 binding = "DB"
 database_name = "qvk-moderator-db"
 database_id = "bbebd392-3ea6-43e7-8012-33c923be4700"
+
+[browser]
+binding = "BROWSER"
+
+[[queues.producers]]
+queue = "qvk-reputation-cleanup"
+binding = "REP_CLEANUP"
+
+[[queues.consumers]]
+queue = "qvk-reputation-cleanup"
+max_batch_size = 10
