@@ -24,12 +24,13 @@ export async function addRep(e,params){
  const mode=await repMode(e,c);
  if(!mode)throw Error("Владелец должен назначить тип группы через /rep_setup");
  if(!modeAllowed(mode,e.REPUTATION_OWNER_ID,a))throw Error("Только владелец может повышать репутацию тестировщиков");
- if(mode==="users"&&amount!==1)throw Error("Участникам доступно только +1");
- if(mode==="testers"&&(!Number.isInteger(amount)||amount<1||amount>5))throw Error("Баллы: от 1 до 5");
+ if(mode==="users"&&![-1,1].includes(amount))throw Error("Участникам доступны только + и - по одному баллу");
+ if(mode==="testers"&&(!Number.isInteger(amount)||amount===0||Math.abs(amount)>5))throw Error("Баллы: от -5 до -1 или от 1 до 5");
+ if(!Number.isSafeInteger(Number(sourceMessage))||Number(sourceMessage)<1)throw Error("Неизвестное сообщение");
  const key=mode==="users"?("daily:"+day()+":"+a+":"+t):("owner:"+a+":"+uid(sourceMessage));
  const r=await e.DB.prepare("INSERT OR IGNORE INTO reputation_votes(chat_id,vote_key,giver_id,receiver_id,amount,ts) VALUES(?,?,?,?,?,?)").bind(c,key,a,t,amount,stamp()).run();
  if(!r.meta?.changes)return {mode,added:false};
- await e.DB.prepare("INSERT INTO reputation_scores(chat_id,user_id,score,updated) VALUES(?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET score=score+excluded.score,updated=excluded.updated").bind(c,t,amount,stamp()).run();
+ // D1 trigger reputation_vote_score applies the accepted vote atomically.
  return {mode,added:true};
 }
 export async function getRep(e,chat,user){
