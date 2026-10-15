@@ -17,5 +17,5 @@ export function repCard(mode,user,score,rank=null){
  "<i>"+(testers?"Оценки назначает владелец QVK":"Оценки участников сообщества")+"</i>"+
  "\n<tg-spoiler>Telegram ID: "+escapeHtml(user.id)+"</tg-spoiler>";
 }
-export function repTopCard(mode,rows){return "<b>🏆 "+(mode==="testers"?"Рейтинг тестировщиков":"Рейтинг сообщества")+"</b>\n\n"+(rows.length?rows.map((x,i)=>(["🥇","🥈","🥉"][i]||"▫️")+" <b>"+escapeHtml(x.name||"Участник")+"</b>"+(x.username?" · @"+escapeHtml(x.username.replace(/^@/,"")):"")+" — <b>"+(x.score>0?"+":"")+x.score+"</b> "+repLevel(x.score)[0]).join("\n"):"🌱 Пока нет оценок.")+"\n\n<i>Ответь + или − на сообщение участника, чтобы оценить его.</i>";}
+export function repTopCard(mode,rows){return "<b>🏆 "+(mode==="testers"?"Рейтинг тестировщиков":"Рейтинг сообщества")+"</b>\n\n"+(rows.length?rows.map((x,i)=>(["🥇","🥈","🥉"][i]||"▫️")+" <b>"+escapeHtml(x.name||"Участник")+"</b>"+(x.role?" · "+escapeHtml(x.role.name):"")+(x.username?" · @"+escapeHtml(x.username.replace(/^@/,"")):"")+" — <b>"+(x.score>0?"+":"")+x.score+"</b> "+repLevel(x.score)[0]).join("\n"):"🌱 Пока нет оценок.")+"\n\n<i>Ответь + или − на сообщение участника, чтобы оценить его.</i>";}
 export const cardButtons=target=>({inline_keyboard:[[{text:"👍 +1",callback_data:"rv:1:"+target},{text:"👎 −1",callback_data:"rv:-1:"+target}],[{text:"🔄 Обновить",callback_data:"rc:"+target}]]});
