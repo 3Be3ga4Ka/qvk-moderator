@@ -27,14 +27,10 @@ export async function addRep(e,params){
  if(mode==="users"&&amount!==1)throw Error("Участникам доступно только +1");
  if(mode==="testers"&&(!Number.isInteger(amount)||amount<1||amount>5))throw Error("Баллы: от 1 до 5");
  const key=mode==="users"?("daily:"+day()+":"+a+":"+t):("owner:"+a+":"+uid(sourceMessage));
- // Only insert and increment in a single atomic SQLite statement through D1 batch,
- // using a conditional SQL insertion based on changes() from the preceding statement.
- const statements=[
-  e.DB.prepare("INSERT OR IGNORE INTO reputation_votes(chat_id,vote_key,giver_id,receiver_id,amount,ts) VALUES(?,?,?,?,?,?)").bind(c,key,a,t,amount,stamp()),
-  e.DB.prepare("INSERT INTO reputation_scores(chat_id,user_id,score,updated) SELECT ?,?,?,? WHERE changes()=1 ON CONFLICT(chat_id,user_id) DO UPDATE SET score=score+excluded.score,updated=excluded.updated").bind(c,t,amount,stamp())
- ];
- const out=await e.DB.batch(statements);
- return {mode,added:!!out[0]?.meta?.changes};
+ const r=await e.DB.prepare("INSERT OR IGNORE INTO reputation_votes(chat_id,vote_key,giver_id,receiver_id,amount,ts) VALUES(?,?,?,?,?,?)").bind(c,key,a,t,amount,stamp()).run();
+ if(!r.meta?.changes)return {mode,added:false};
+ await e.DB.prepare("INSERT INTO reputation_scores(chat_id,user_id,score,updated) VALUES(?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET score=score+excluded.score,updated=excluded.updated").bind(c,t,amount,stamp()).run();
+ return {mode,added:true};
 }
 export async function getRep(e,chat,user){
  const row=await e.DB.prepare("SELECT score FROM reputation_scores WHERE chat_id=? AND user_id=?").bind(uid(chat),uid(user)).first();
