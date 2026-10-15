@@ -1,3 +1,4 @@
+import {pluginAction} from "./plugin_actions.js";
 import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
 import {discover,dmHome,dmCallback,dmText} from "./dm.js";
@@ -285,6 +286,7 @@ export default {async fetch(req,e,ctx){
  if(req.method==="GET"&&url.pathname==="/app")return page();
  if(url.pathname==="/api/app")return appApi(req,e,analytics);
  if(url.pathname==="/api/plugin/warn"&&req.method==="POST")return pluginWarning(req,e);
+ if(url.pathname==="/api/plugin/action"&&req.method==="POST")return pluginAction(req,e,api);
  if(req.method!=="POST"||url.pathname!=="/webhook")return new Response("Not Found",{status:404});
  if(!e.BOT_TOKEN||!e.WEBHOOK_SECRET||!e.ADMIN_IDS||!e.DB)return new Response("Not configured",{status:503});
  if(req.headers.get("X-Telegram-Bot-Api-Secret-Token")!==e.WEBHOOK_SECRET)return new Response("Unauthorized",{status:401});
