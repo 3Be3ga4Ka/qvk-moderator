@@ -1,9 +1,10 @@
+import {repCard,repTopCard,cardButtons} from "./reputation_cards.js";
 import {setupRep,repMode,addRep,getRep,topRep} from "./reputation.js";
 import {pluginAction} from "./plugin_actions.js";
 import {assess,LABELS,GUIDES} from "./rules.js";
 import {linkRisk,normalized,fastHash,evaluateFlood} from "./guards.js";
 import {discover,dmHome,dmCallback,dmText} from "./dm.js";
-import {rememberUser} from "./people.js";
+import {rememberUser,person} from "./people.js";
 import {raidJoin,observePunishment,analytics,setting,logAction} from "./advanced.js";
 import {page,appApi} from "./miniapp.js";
 import {supportMessage,autoSupport} from "./support.js";
@@ -155,11 +156,15 @@ async function command(e,m){
    if(!mode)return answer("Репутация здесь пока не настроена. Владелец: /rep_setup testers или /rep_setup users");
    if(cmd==="/rep_top"){
     const ranking=await topRep(e,c);
-    return answer((mode==="testers"?"🏆 Репутация тестировщиков":"💜 Репутация участников")+"\n"+(ranking.length?ranking.map((x,i)=>(i+1)+". ID "+x.user_id+" — "+x.score).join("\n"):"Пока нет оценок"));
+    const named=await Promise.all(ranking.map(async x=>({...x,...await person(e,c,x.user_id)})));
+    return send(e,c,repTopCard(mode,named),{message_thread_id:m.message_thread_id,parse_mode:"HTML"});
    }
-   if(cmd==="/rep_me"||cmd==="/rep"&&!m.reply_to_message){
-    const user=m.from.id,score=await getRep(e,c,user);
-    return answer((mode==="testers"?"🏆 Репутация тестировщика":"💜 Репутация пользователя")+": "+score+"\nID "+user);
+   if(cmd==="/rep_me"||cmd==="/rep"){
+    const target=cmd==="/rep"&&m.reply_to_message?.from&&!m.reply_to_message.sender_chat&&!m.reply_to_message.from?.is_bot?m.reply_to_message.from:m.from;
+    const profile=await person(e,c,target.id);
+    const score=await getRep(e,c,target.id);
+    const ranking=await topRep(e,c),rank=ranking.findIndex(x=>String(x.user_id)===String(target.id));
+    if(cmd==="/rep_me"||cmd==="/rep")return send(e,c,repCard(mode,{...profile,id:target.id},score,rank>=0?rank+1:null),{message_thread_id:m.message_thread_id,parse_mode:"HTML",reply_markup:cardButtons(target.id)});
    }
    const target=m.reply_to_message?.from;
    if(!target||target.is_bot||m.reply_to_message.sender_chat)return answer("Ответь командой на сообщение обычного участника.");
@@ -238,6 +243,25 @@ async function command(e,m){
 }
 async function callback(e,q){
  const m=q.message;if(!m)return;
+ if(q.data?.startsWith("rv:")||q.data?.startsWith("rc:")){
+  let text="";try{
+   if(!["group","supergroup"].includes(m.chat.type))throw Error("Доступно только в группе");
+   const pieces=String(q.data).split(":"),target=pieces[pieces.length-1];
+   if(!/^[1-9]\\d{2,19}$/.test(target))throw Error("Неверный участник");
+   const mode=await repMode(e,m.chat.id);
+   if(!mode)throw Error("Репутация не настроена");
+   if(pieces[0]==="rv"){
+    const delta=Number(pieces[1]);if(![-1,1].includes(delta))throw Error("Недопустимый голос");
+    const result=await addRep(e,{chat:m.chat.id,actor:q.from.id,target,sourceMessage:m.message_id,amount:delta});
+    if(!result.added)throw Error("Голос этому участнику уже учтён");
+    text=delta>0?"✅ +1 начислен":"✅ −1 учтён";
+   }else{text="🔄 Обновлено";}
+   const profile=await person(e,m.chat.id,target),score=await getRep(e,m.chat.id,target);
+   const ranking=await topRep(e,m.chat.id),rank=ranking.findIndex(x=>String(x.user_id)===target);
+   await api(e,"editMessageText",{chat_id:m.chat.id,message_id:m.message_id,text:repCard(mode,{...profile,id:target},score,rank>=0?rank+1:null),parse_mode:"HTML",reply_markup:cardButtons(target)});
+  }catch(err){text="⚠️ "+safe(err.message)}
+  return api(e,"answerCallbackQuery",{callback_query_id:q.id,text,show_alert:text.startsWith("⚠️")});
+ }
  if(q.data?.startsWith("appeal:")){
   const result=await requestAppeal(e,q);
   return api(e,"answerCallbackQuery",{callback_query_id:q.id,text:result?.ok?"✅ Апелляция отправлена администрации":result?.error||"Не удалось отправить",show_alert:true});
