@@ -20,3 +20,9 @@ export async function sendPng(e,chat,mode,user,score,rank,opts={}){
  const form=new FormData();form.set("chat_id",String(chat));form.set("photo",new Blob([bytes],{type:"image/png"}),"qvk-reputation.png");form.set("caption","🏆 "+(user.name||"Участник")+" · "+(score>0?"+":"")+score+" баллов");if(opts.message_thread_id)form.set("message_thread_id",String(opts.message_thread_id));if(opts.reply_markup)form.set("reply_markup",JSON.stringify(opts.reply_markup));
  const r=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/sendPhoto",{method:"POST",body:form});const j=await r.json();if(!j.ok)throw Error("Telegram sendPhoto: "+j.description);return j.result;
 }
+
+export async function editPng(e,chat,messageId,mode,user,score,rank,buttons){
+ const bytes=await pngCard(e,mode,user,score,rank);
+ const form=new FormData();form.set("chat_id",String(chat));form.set("message_id",String(messageId));form.set("media",JSON.stringify({type:"photo",media:"attach://card",caption:"🏆 "+(user.name||"Участник")+" · "+(score>0?"+":"")+score+" баллов"}));form.set("card",new Blob([bytes],{type:"image/png"}),"qvk-reputation.png");form.set("reply_markup",JSON.stringify(buttons));
+ const res=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/editMessageMedia",{method:"POST",body:form});const data=await res.json();if(!data.ok)throw Error("Telegram editMessageMedia: "+data.description);return data.result;
+}
