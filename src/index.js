@@ -161,6 +161,7 @@ async function command(e,m){
    }
    if(cmd==="/rep_me"||cmd==="/rep"){
     const target=cmd==="/rep"&&m.reply_to_message?.from&&!m.reply_to_message.sender_chat&&!m.reply_to_message.from?.is_bot?m.reply_to_message.from:m.from;
+    if(target.first_name||target.username)await rememberUser(e,c,target);
     const profile=await person(e,c,target.id);
     const score=await getRep(e,c,target.id);
     const ranking=await topRep(e,c),rank=ranking.findIndex(x=>String(x.user_id)===String(target.id));
@@ -258,7 +259,11 @@ async function callback(e,q){
    }else{text="🔄 Обновлено";}
    const profile=await person(e,m.chat.id,target),score=await getRep(e,m.chat.id,target);
    const ranking=await topRep(e,m.chat.id),rank=ranking.findIndex(x=>String(x.user_id)===target);
-   await api(e,"editMessageText",{chat_id:m.chat.id,message_id:m.message_id,text:repCard(mode,{...profile,id:target},score,rank>=0?rank+1:null),parse_mode:"HTML",reply_markup:cardButtons(target)});
+   const nextText=repCard(mode,{...profile,id:target},score,rank>=0?rank+1:null);
+   if(m.text!==nextText){
+    try{await api(e,"editMessageText",{chat_id:m.chat.id,message_id:m.message_id,text:nextText,parse_mode:"HTML",reply_markup:cardButtons(target)});}
+    catch(err){if(!String(err).includes("message is not modified"))throw err;}
+   }else if(pieces[0]==="rc")text="✅ Уже актуально";
   }catch(err){text="⚠️ "+safe(err.message)}
   return api(e,"answerCallbackQuery",{callback_query_id:q.id,text,show_alert:text.startsWith("⚠️")});
  }
@@ -310,6 +315,7 @@ async function handle(e,u){
     const delta=plain==="+"?1:-1;
     const r=await addRep(e,{chat:message.chat.id,actor:message.from.id,target:target.id,sourceMessage:message.message_id,amount:delta});
     const value=await getRep(e,message.chat.id,target.id);
+    if(target.first_name||target.username)await rememberUser(e,message.chat.id,target);
     const p=await person(e,message.chat.id,target.id);
     await send(e,message.chat.id,r.added?(delta>0?"💜 +1":"💔 −1")+" к репутации "+(p.name||"участника")+". Сейчас: "+value:"ℹ️ Голос уже учтён. Повторная оценка ограничена правилами группы.",{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
    }catch(err){await send(e,message.chat.id,"⚠️ "+safe(err.message),{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});}
