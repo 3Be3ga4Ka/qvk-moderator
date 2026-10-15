@@ -166,7 +166,7 @@ async function command(e,m){
    const raw=String(m.text||"").trim().split(/\s+/)[1];
    const amount=cmd==="/rep_add"?Number(raw||1):1;
    if(cmd==="/rep_add"&&mode!=="testers")return answer("В группе пользователей используется /rep ответом на сообщение (+1).");
-   if(cmd==="/rep"&&mode==="testers")return answer("Баллы тестировщикам выдаёт только владелец: /rep_add 1–5 в ответ на сообщение.");
+   if(cmd==="/rep"&&mode==="testers")return answer("В группе тестировщиков + и - может ставить только владелец, ответом на сообщение.");
    const result=await addRep(e,{chat:c,actor:m.from.id,target:target.id,sourceMessage:m.message_id,amount});
    return answer(result.added?"✅ +"+amount+" к репутации ID "+target.id:"ℹ️ Уже оценено. Пользователи могут поставить +1 этому человеку раз в сутки.");
   }catch(err){return answer("⚠️ "+safe(err.message));}
@@ -278,6 +278,19 @@ async function handle(e,u){
  if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&(!String(u.message.text||"").startsWith("/")||String(u.message.text||"").startsWith("/cancel"))&&await dmText(e,u.message,send))return;
  if(u.message.new_chat_members?.length)await raidJoin(e,u.message,send);
  if(await cleanJoinService(e,u.message))return;
+ const message=u.message,plain=String(message.text||"").trim();
+ if(["+","-"].includes(plain)&&["group","supergroup"].includes(message.chat?.type)&&message.from&&!message.from.is_bot&&!message.sender_chat){
+  const target=message.reply_to_message?.from;
+  if(target&&!target.is_bot&&!message.reply_to_message.sender_chat){
+   try{
+    const delta=plain==="+"?1:-1;
+    const r=await addRep(e,{chat:message.chat.id,actor:message.from.id,target:target.id,sourceMessage:message.message_id,amount:delta});
+    const value=await getRep(e,message.chat.id,target.id);
+    await send(e,message.chat.id,r.added?(delta>0?"💜 +1":"💔 −1")+" к репутации ID "+target.id+". Сейчас: "+value:"ℹ️ Голос уже учтён. Повторно изменить репутацию этому участнику можно завтра.",{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
+   }catch(err){await send(e,message.chat.id,"⚠️ "+safe(err.message),{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});}
+   return;
+  }
+ }
  if(String(u.message.text||"").startsWith("/"))return command(e,u.message);
  if(await antiSpam(e,u.message))return;
  await autoSupport(e,u.message,send);
