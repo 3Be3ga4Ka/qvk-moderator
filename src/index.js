@@ -1,4 +1,4 @@
-import {sendPng} from "./reputation_png.js";
+import {sendPng,editPng} from "./reputation_png.js";
 import {repCard,repTopCard,cardButtons} from "./reputation_cards.js";
 import {setupRep,repMode,addRep,getRep,topRep} from "./reputation.js";
 import {pluginAction} from "./plugin_actions.js";
@@ -261,11 +261,8 @@ async function callback(e,q){
    }else{text="🔄 Обновлено";}
    const profile=await person(e,m.chat.id,target),score=await getRep(e,m.chat.id,target);
    const ranking=await topRep(e,m.chat.id),rank=ranking.findIndex(x=>String(x.user_id)===target);
-   const nextText=repCard(mode,{...profile,id:target},score,rank>=0?rank+1:null);
-   if(m.text!==nextText){
-    try{await api(e,"editMessageText",{chat_id:m.chat.id,message_id:m.message_id,text:nextText,parse_mode:"HTML",reply_markup:cardButtons(target)});}
-    catch(err){if(!String(err).includes("message is not modified"))throw err;}
-   }else if(pieces[0]==="rc")text="✅ Уже актуально";
+   await editPng(e,m.chat.id,m.message_id,mode,{...profile,id:target},score,rank>=0?rank+1:null,cardButtons(target));
+   if(pieces[0]==="rc")text="✅ Обновлено";
   }catch(err){text="⚠️ "+safe(err.message)}
   return api(e,"answerCallbackQuery",{callback_query_id:q.id,text,show_alert:text.startsWith("⚠️")});
  }
