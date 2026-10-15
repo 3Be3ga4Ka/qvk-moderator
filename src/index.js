@@ -173,7 +173,7 @@ async function command(e,m){
    if(cmd==="/rep_add"&&mode!=="testers")return answer("В группе пользователей используется /rep ответом на сообщение (+1).");
    if(cmd==="/rep"&&mode==="testers")return answer("В группе тестировщиков + и - может ставить только владелец, ответом на сообщение.");
    const result=await addRep(e,{chat:c,actor:m.from.id,target:target.id,sourceMessage:m.message_id,amount});
-   return answer(result.added?"✅ +"+amount+" к репутации ID "+target.id:"ℹ️ Уже оценено. Пользователи могут поставить +1 этому человеку раз в сутки.");
+   const p=await person(e,c,target.id);return answer(result.added?"✅ "+(amount>0?"+":"")+amount+" к репутации "+(p.name||"участника"):"ℹ️ Голос уже учтён. Повторный голос в этой группе ограничен правилами репутации.");
   }catch(err){return answer("⚠️ "+safe(err.message));}
  }
  if(cmd==="/ticket"||cmd==="/bug"){
@@ -247,7 +247,7 @@ async function callback(e,q){
   let text="";try{
    if(!["group","supergroup"].includes(m.chat.type))throw Error("Доступно только в группе");
    const pieces=String(q.data).split(":"),target=pieces[pieces.length-1];
-   if(!/^[1-9]\\d{2,19}$/.test(target))throw Error("Неверный участник");
+   if(!/^[1-9]\d{2,19}$/.test(target))throw Error("Неверный участник");
    const mode=await repMode(e,m.chat.id);
    if(!mode)throw Error("Репутация не настроена");
    if(pieces[0]==="rv"){
@@ -310,7 +310,8 @@ async function handle(e,u){
     const delta=plain==="+"?1:-1;
     const r=await addRep(e,{chat:message.chat.id,actor:message.from.id,target:target.id,sourceMessage:message.message_id,amount:delta});
     const value=await getRep(e,message.chat.id,target.id);
-    await send(e,message.chat.id,r.added?(delta>0?"💜 +1":"💔 −1")+" к репутации ID "+target.id+". Сейчас: "+value:"ℹ️ Голос уже учтён. Повторно изменить репутацию этому участнику можно завтра.",{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
+    const p=await person(e,message.chat.id,target.id);
+    await send(e,message.chat.id,r.added?(delta>0?"💜 +1":"💔 −1")+" к репутации "+(p.name||"участника")+". Сейчас: "+value:"ℹ️ Голос уже учтён. Повторная оценка ограничена правилами группы.",{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
    }catch(err){await send(e,message.chat.id,"⚠️ "+safe(err.message),{message_thread_id:message.message_thread_id,reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});}
    return;
   }
