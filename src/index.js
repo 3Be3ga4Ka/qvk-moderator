@@ -252,11 +252,39 @@ async function handle(e,u){
  await autoSupport(e,u.message,send);
  return moderate(e,u.message);
 }
+async function pluginWarning(req,e){
+ if(!e.QVK_PLUGIN_SECRET||String(e.QVK_PLUGIN_SECRET).length<24)return Response.json({error:"QVK_PLUGIN_SECRET не настроен"},{status:503});
+ let data;try{data=await req.json()}catch{return Response.json({error:"JSON invalid"},{status:400})}
+ const chat=String(data.chat||""),user=String(data.user||""),msg=Number(data.message_id),reason=String(data.reason||"").trim();
+ if(!/^-?\d{5,20}$/.test(chat)||!/^[1-9]\d{2,19}$/.test(user)||!Number.isSafeInteger(msg)||msg<1||reason.length<5||reason.length>180)return Response.json({error:"Недопустимые данные"},{status:400});
+ const timestamp=Number(req.headers.get("x-qvk-timestamp")),nonce=String(req.headers.get("x-qvk-nonce")||"");
+ if(!Number.isSafeInteger(timestamp)||Math.abs(now()-timestamp)>90||!/^[-_a-f0-9]{16,80}$/i.test(nonce))return Response.json({error:"Срок запроса истёк"},{status:401});
+ const raw=timestamp+"\n"+nonce+"\n"+chat+"\n"+user+"\n"+msg+"\n"+reason;
+ const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(String(e.QVK_PLUGIN_SECRET)),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+ const sig=new Uint8Array(await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(raw)));
+ const expected=[...sig].map(x=>x.toString(16).padStart(2,"0")).join("");
+ const supplied=String(req.headers.get("x-qvk-signature")||"");
+ let diff=expected.length^supplied.length;for(let i=0;i<expected.length;i++)diff|=expected.charCodeAt(i)^(supplied.charCodeAt(i)||0);
+ if(diff)return Response.json({error:"Доступ запрещён"},{status:403});
+ const registered=await e.DB.prepare("SELECT value FROM settings WHERE chat_id='_registry' AND key=?").bind("chat:"+chat).first();
+ if(!registered)return Response.json({error:"Чат не зарегистрирован"},{status:403});
+ const permitted=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key='plugin_warnings'").bind(chat).first();
+ if(permitted?.value!=="on")return Response.json({error:"Ручные предупреждения бота не включены в этом чате"},{status:403});
+ const replay=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind("_plugin","manual:"+nonce,now()).run();
+ if(!replay.meta?.changes)return Response.json({error:"Повторный запрос"},{status:409});
+ const line="⚠️ Замечание модератора QVK\nУчастник: ID "+user+"\nПричина: "+reason+"\n\nПожалуйста, соблюдай правила чата 💜";
+ try{
+  await send(e,chat,line,{reply_parameters:{message_id:msg,allow_sending_without_reply:false}});
+  await log(e,chat,"",user,"plugin_manual_warning",reason);
+  return Response.json({ok:true});
+ }catch(err){console.error("Plugin warning delivery",String(err));return Response.json({error:"Не удалось отправить сообщение: проверь права бота и исходное сообщение"},{status:502})}
+}
 export default {async fetch(req,e,ctx){
  const url=new URL(req.url);
  if(req.method==="GET"&&url.pathname==="/health")return new Response("QVK Moderator ready");
  if(req.method==="GET"&&url.pathname==="/app")return page();
  if(url.pathname==="/api/app")return appApi(req,e,analytics);
+ if(url.pathname==="/api/plugin/warn"&&req.method==="POST")return pluginWarning(req,e);
  if(req.method!=="POST"||url.pathname!=="/webhook")return new Response("Not Found",{status:404});
  if(!e.BOT_TOKEN||!e.WEBHOOK_SECRET||!e.ADMIN_IDS||!e.DB)return new Response("Not configured",{status:503});
  if(req.headers.get("X-Telegram-Bot-Api-Secret-Token")!==e.WEBHOOK_SECRET)return new Response("Unauthorized",{status:401});
