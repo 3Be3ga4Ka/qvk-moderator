@@ -1,3 +1,4 @@
+import {sendPng} from "./reputation_png.js";
 import {repCard,repTopCard,cardButtons} from "./reputation_cards.js";
 import {setupRep,repMode,addRep,getRep,topRep} from "./reputation.js";
 import {pluginAction} from "./plugin_actions.js";
@@ -19,6 +20,7 @@ const exempt=(e,u)=>isAdmin(e,u)&&!(String(u?.id)==="5110155633"&&e.__selfTest==
 async function exemptInChat(e,c,u){e.__selfTest=await get(e,c,"self_test");return exempt(e,u);}
 async function api(e,method,data){const r=await fetch("https://api.telegram.org/bot"+e.BOT_TOKEN+"/"+method,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||!j.ok)throw Error("Telegram "+method+": "+(j.description||r.status));return j.result;}
 const send=(e,chat,text,opts={})=>api(e,"sendMessage",{chat_id:chat,text,...opts});
+async function queueRepCleanup(e,chat,ids){if(!e.REP_CLEANUP)throw Error("Очередь REP_CLEANUP не настроена");await e.REP_CLEANUP.send({chat:String(chat),ids:ids.map(Number).filter(Number.isSafeInteger)},{delaySeconds:60});}
 async function get(e,c,k){const r=await e.DB.prepare("SELECT value FROM settings WHERE chat_id=? AND key=?").bind(String(c),k).first();return r?.value??S[k]??"";}
 async function set(e,c,k,v){await e.DB.prepare("INSERT INTO settings(chat_id,key,value) VALUES(?,?,?) ON CONFLICT(chat_id,key) DO UPDATE SET value=excluded.value").bind(String(c),k,v).run();}
 async function log(e,c,t,u,a,reason=""){await e.DB.prepare("INSERT INTO events(chat_id,thread_id,user_id,action,reason,ts) VALUES(?,?,?,?,?,?)").bind(String(c),String(t??""),String(u??""),a,safe(reason),now()).run();}
@@ -157,7 +159,7 @@ async function command(e,m){
    if(cmd==="/rep_top"){
     const ranking=await topRep(e,c);
     const named=await Promise.all(ranking.map(async x=>({...x,...await person(e,c,x.user_id)})));
-    return send(e,c,repTopCard(mode,named),{message_thread_id:m.message_thread_id,parse_mode:"HTML"});
+    const result=await send(e,c,repTopCard(mode,named),{message_thread_id:m.message_thread_id,parse_mode:"HTML"});await queueRepCleanup(e,c,[m.message_id,result.message_id]);return result;
    }
    if(cmd==="/rep_me"||cmd==="/rep"){
     const target=cmd==="/rep"&&m.reply_to_message?.from&&!m.reply_to_message.sender_chat&&!m.reply_to_message.from?.is_bot?m.reply_to_message.from:m.from;
@@ -165,7 +167,7 @@ async function command(e,m){
     const profile=await person(e,c,target.id);
     const score=await getRep(e,c,target.id);
     const ranking=await topRep(e,c),rank=ranking.findIndex(x=>String(x.user_id)===String(target.id));
-    if(cmd==="/rep_me"||cmd==="/rep")return send(e,c,repCard(mode,{...profile,id:target.id},score,rank>=0?rank+1:null),{message_thread_id:m.message_thread_id,parse_mode:"HTML",reply_markup:cardButtons(target.id)});
+    if(cmd==="/rep_me"||cmd==="/rep"){const result=await sendPng(e,c,mode,{...profile,id:target.id},score,rank>=0?rank+1:null,{message_thread_id:m.message_thread_id,reply_markup:cardButtons(target.id)});await queueRepCleanup(e,c,[m.message_id,result.message_id]);return result;}
    }
    const target=m.reply_to_message?.from;
    if(!target||target.is_bot||m.reply_to_message.sender_chat)return answer("Ответь командой на сообщение обычного участника.");
@@ -354,7 +356,7 @@ async function pluginWarning(req,e){
   return Response.json({ok:true});
  }catch(err){console.error("Plugin warning delivery",String(err));return Response.json({error:"Не удалось отправить сообщение: проверь права бота и исходное сообщение"},{status:502})}
 }
-export default {async fetch(req,e,ctx){
+export default {async queue(batch,e){for(const message of batch.messages){const data=message.body;if(!data||!/^-[0-9]{5,20}$/.test(data.chat)||!Array.isArray(data.ids)){message.ack();continue}for(const id of data.ids){try{await api(e,"deleteMessage",{chat_id:data.chat,message_id:id})}catch(err){console.warn("Reputation cleanup failed",String(err))}}message.ack()}},async fetch(req,e,ctx){
  const url=new URL(req.url);
  if(req.method==="GET"&&url.pathname==="/health")return new Response("QVK Moderator ready");
  if(req.method==="GET"&&url.pathname==="/app")return page();
