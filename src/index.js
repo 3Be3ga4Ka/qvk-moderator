@@ -1,3 +1,4 @@
+import {startBug,privateBug,bugForm,submitBug} from "./bug_form.js";
 import {roleFor,assignRole,roleOptions} from "./roles.js";
 import {sendPng,editPng} from "./reputation_png.js";
 import {repCard,repTopCard,cardButtons} from "./reputation_cards.js";
@@ -198,7 +199,8 @@ async function command(e,m){
    const p=await person(e,c,target.id);return answer(result.added?"✅ "+(amount>0?"+":"")+amount+" к репутации "+(p.name||"участника"):"ℹ️ Голос уже учтён. Повторный голос в этой группе ограничен правилами репутации.");
   }catch(err){return answer("⚠️ "+safe(err.message));}
  }
- if(cmd==="/ticket"||cmd==="/bug"){
+ if(cmd==="/bug")return startBug(e,m);
+ if(cmd==="/ticket"){
   if(!["group","supergroup"].includes(m.chat.type)||!m.from||m.from.is_bot)return;
   const description=String(m.text||"").replace(/^\/\w+(?:@\w+)?\s*/,"").trim();
   if(description.length<12)return send(e,c,"Опиши проблему после команды, минимум 12 символов. Например: /bug test38 Android 15 — не открывается плеер.",{message_thread_id:m.message_thread_id});
@@ -323,6 +325,7 @@ async function handle(e,u){
   await rememberUser(e,u.message.chat.id,u.message.from);
   for(const member of u.message.new_chat_members||[])await rememberUser(e,u.message.chat.id,member);
  }
+ if(u.message.chat.type==="private"&&await privateBug(e,u.message))return;
  if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&(!String(u.message.text||"").startsWith("/")||String(u.message.text||"").startsWith("/cancel"))&&await dmText(e,u.message,send))return;
  if(u.message.new_chat_members?.length)await raidJoin(e,u.message,send);
  if(await cleanJoinService(e,u.message))return;
@@ -377,6 +380,8 @@ export default {async queue(batch,e){for(const message of batch.messages){const 
  const url=new URL(req.url);
  if(req.method==="GET"&&url.pathname==="/health")return new Response("QVK Moderator ready");
  if(req.method==="GET"&&url.pathname==="/app")return page();
+ if(req.method==="GET"&&url.pathname==="/bug-form")return bugForm();
+ if(req.method==="POST"&&url.pathname==="/api/bug")return submitBug(req,e);
  if(url.pathname==="/api/app")return appApi(req,e,analytics);
  if(url.pathname==="/api/plugin/warn"&&req.method==="POST")return pluginWarning(req,e);
  if(url.pathname==="/api/plugin/action"&&req.method==="POST")return pluginAction(req,e,api);
