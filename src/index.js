@@ -314,7 +314,7 @@ async function callback(e,q){
   else if(["enable","disable","ai_on","ai_off"].includes(q.data)){const key=q.data.startsWith("ai_")?"ai":"enabled";await set(e,m.chat.id,key,q.data==="enable"||q.data==="ai_on"?"on":"off");await send(e,m.chat.id,"✅ Настройка сохранена",{message_thread_id:m.message_thread_id});}
  }finally{await api(e,"answerCallbackQuery",{callback_query_id:q.id});}
 }
-async function handle(e,u){
+async function handle(e,u,origin){
  const k=String(u.update_id??"");
  if(k){const r=await e.DB.prepare("INSERT OR IGNORE INTO processed(chat_id,key,ts) VALUES(?,?,?)").bind("_updates",k,now()).run();if(!r.meta?.changes)return;}
  if(u.callback_query)return callback(e,u.callback_query);
@@ -325,7 +325,7 @@ async function handle(e,u){
   await rememberUser(e,u.message.chat.id,u.message.from);
   for(const member of u.message.new_chat_members||[])await rememberUser(e,u.message.chat.id,member);
  }
- if(u.message.chat.type==="private"&&await privateBug(e,u.message))return;
+ if(u.message.chat.type==="private"&&await privateBug(e,u.message,origin))return;
  if(u.message.chat.type==="private"&&isAdmin(e,u.message.from)&&(!String(u.message.text||"").startsWith("/")||String(u.message.text||"").startsWith("/cancel"))&&await dmText(e,u.message,send))return;
  if(u.message.new_chat_members?.length)await raidJoin(e,u.message,send);
  if(await cleanJoinService(e,u.message))return;
@@ -389,6 +389,6 @@ export default {async queue(batch,e){for(const message of batch.messages){const 
  if(!e.BOT_TOKEN||!e.WEBHOOK_SECRET||!e.ADMIN_IDS||!e.DB)return new Response("Not configured",{status:503});
  if(req.headers.get("X-Telegram-Bot-Api-Secret-Token")!==e.WEBHOOK_SECRET)return new Response("Unauthorized",{status:401});
  let u;try{u=await req.json();}catch{return new Response("Bad JSON",{status:400});}
- ctx.waitUntil(handle(e,u).catch(err=>console.error("Update failed",String(err))));
+ ctx.waitUntil(handle(e,u,url.origin).catch(err=>console.error("Update failed",String(err))));
  return new Response("OK");
 }};
